@@ -49,7 +49,7 @@ async function planUpdate(manifest, gameDirPath) {
   const toDownload = [];
   for (const file of manifest.files) {
     const dest = path.join(gameDirPath, ...file.path.split('/'));
-    if (!(await fileMatches(dest, file.sha1, file.size))) toDownload.push(file);
+    if (!(await fileMatches(dest, { sha1: file.sha1, size: file.size }))) toDownload.push(file);
   }
 
   const manifestPaths = new Set(manifest.files.map((f) => f.path));

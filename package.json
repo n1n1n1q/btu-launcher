@@ -11,6 +11,8 @@
     "start": "electron .",
     "dist": "electron-builder",
     "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux",
     "publish-update": "node tools/publish-update.js"
   },
   "dependencies": {

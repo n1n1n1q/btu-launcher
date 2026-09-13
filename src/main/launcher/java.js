@@ -61,7 +61,11 @@ async function ensureJava17(onProgress) {
   const archivePath = path.join(paths.cacheRoot(), 'downloads', `jre17-${ADOPTIUM_ARCH}.zip`);
 
   await ensureFile(archiveUrl, archivePath, {
-    sha1: undefined, // Adoptium publishes sha256, not sha1; size-only check is enough here.
+    // Adoptium publishes sha256 rather than sha1. Verify it: a size-only check
+    // passes a download that arrived complete in length but corrupt in content,
+    // and because the size keeps matching, that bad archive is then cached
+    // forever and every launch fails identically on extraction.
+    sha256: binary.package.checksum,
     size: binary.package.size,
     onProgress,
   });
@@ -69,8 +73,20 @@ async function ensureJava17(onProgress) {
   const extractDir = path.join(paths.javaDir(), '17');
   await fsp.rm(extractDir, { recursive: true, force: true });
   await fsp.mkdir(extractDir, { recursive: true });
-  const zip = new AdmZip(archivePath);
-  zip.extractAllTo(extractDir, true);
+  try {
+    const zip = new AdmZip(archivePath);
+    zip.extractAllTo(extractDir, true);
+  } catch (err) {
+    // Bin both the archive and the half-extracted tree so the next attempt
+    // re-downloads instead of replaying the same failure, and say which step
+    // broke -- a bare zlib "invalid block type" tells a player nothing.
+    await fsp.rm(archivePath, { force: true }).catch(() => {});
+    await fsp.rm(extractDir, { recursive: true, force: true }).catch(() => {});
+    throw new Error(
+      `Could not unpack the downloaded Java runtime (${err.message}). ` +
+        'The download has been discarded -- press Play again to retry.'
+    );
+  }
 
   // Adoptium zips contain one top-level folder (e.g. jdk-17.0.13+11-jre) --
   // flatten it so javawPath()'s fixed layout holds.
@@ -81,6 +97,17 @@ async function ensureJava17(onProgress) {
       await fsp.rename(path.join(inner, name), path.join(extractDir, name));
     }
     await fsp.rmdir(inner);
+  }
+
+  // macOS Adoptium archives additionally nest the real JRE under
+  // Contents/Home (that's the layout /usr/libexec/java_home expects) --
+  // flatten that too so it matches Windows/Linux's flat bin/lib layout.
+  const contentsHome = path.join(extractDir, 'Contents', 'Home');
+  if (fs.existsSync(contentsHome)) {
+    for (const name of await fsp.readdir(contentsHome)) {
+      await fsp.rename(path.join(contentsHome, name), path.join(extractDir, name));
+    }
+    await fsp.rm(path.join(extractDir, 'Contents'), { recursive: true, force: true });
   }
 
   const finalPath = javawPath();

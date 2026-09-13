@@ -3,6 +3,14 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('btu', {
+  platform: process.platform,
+  win: {
+    minimize: () => ipcRenderer.invoke('window:minimize'),
+    toggleMaximize: () => ipcRenderer.invoke('window:toggle-maximize'),
+    close: () => ipcRenderer.invoke('window:close'),
+    isMaximized: () => ipcRenderer.invoke('window:is-maximized'),
+    onMaximizedChanged: (cb) => ipcRenderer.on('window:maximized-changed', (_e, v) => cb(v)),
+  },
   config: {
     getAll: () => ipcRenderer.invoke('config:get-all'),
     set: (key, value) => ipcRenderer.invoke('config:set', key, value),
@@ -17,6 +25,18 @@ contextBridge.exposeInMainWorld('btu', {
     checkUpdate: () => ipcRenderer.invoke('modpack:check-update'),
     applyUpdate: (manifest) => ipcRenderer.invoke('modpack:apply-update', manifest),
     onProgress: (cb) => ipcRenderer.on('modpack:update-progress', (_e, p) => cb(p)),
+  },
+  updater: {
+    onStatus: (cb) => ipcRenderer.on('updater:status', (_e, p) => cb(p)),
+  },
+  maintenance: {
+    usage: () => ipcRenderer.invoke('maintenance:usage'),
+    reinstall: (groups) => ipcRenderer.invoke('maintenance:reinstall', groups),
+    dataLocation: () => ipcRenderer.invoke('maintenance:data-location'),
+    chooseDataDir: () => ipcRenderer.invoke('maintenance:choose-data-dir'),
+    moveDataDir: (parentDir) => ipcRenderer.invoke('maintenance:move-data-dir', parentDir),
+    resetDataDir: () => ipcRenderer.invoke('maintenance:reset-data-dir'),
+    onMoveProgress: (cb) => ipcRenderer.on('maintenance:move-progress', (_e, p) => cb(p)),
   },
   game: {
     launch: (profile) => ipcRenderer.invoke('game:launch', profile),

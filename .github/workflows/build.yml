@@ -1,0 +1,43 @@
+name: Build launcher
+
+# Builds the launcher for all three OSes. electron-builder needs to run on
+# (or emulate) the OS it's targeting -- macOS builds in particular basically
+# require real macOS -- so this uses GitHub's hosted runners instead of
+# building locally. See docs/SETUP.md Part D for the full picture.
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            script: dist:win
+          - os: macos-latest
+            script: dist:mac
+          - os: ubuntu-latest
+            script: dist:linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm run ${{ matrix.script }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: btu-launcher-${{ matrix.os }}
+          # electron-builder's actual installer/output files, not the whole
+          # dist/ tree (which also has unpacked build junk).
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.AppImage
+            dist/*.yml
+            dist/*.blockmap
+          if-no-files-found: ignore

@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const paths = require('../paths');
+const config = require('../config');
 const { fetchInstanceMeta } = require('./metaFetch');
 const { ensureJava17 } = require('./java');
 const { ensureFile } = require('./downloader');
@@ -13,6 +14,7 @@ const { resolveLibraries, libraryCachePath } = require('./libraryResolver');
 const { buildMergedJar } = require('./jarmod');
 const { extractNatives } = require('./natives');
 const { installLegacyAssets } = require('./assets');
+const { seedServerList } = require('./serverList');
 
 function substituteArgs(template, values) {
   return template.split(' ').map((token) =>
@@ -84,6 +86,10 @@ async function ensureInstanceFiles(btaVersion, report) {
     report(`Downloading assets... ${p.done}/${p.total}`)
   );
 
+  // First-launch convenience: pre-add the BTU server to the multiplayer list
+  // (no-op if servers_new.dat already exists -- see serverList.js).
+  await seedServerList(gameDirPath, config.get('serverAddress'));
+
   return {
     meta,
     javaBin,
@@ -118,9 +124,8 @@ async function launch({ btaVersion, profile, ramMb, report = () => {} }) {
   });
 
   // NOTE: vanilla b1.7.3 has no CLI flag to auto-join a server -- players
-  // still pick it from the in-game multiplayer list. A nice follow-up is
-  // pre-seeding <gameDir>/servers_new.dat with the BTU server entry (it's a
-  // small NBT list) so it's there on first launch; not done yet.
+  // still pick it from the in-game multiplayer list. It's pre-added there
+  // via seedServerList() in ensureInstanceFiles(), above.
   const jvmArgs = [
     `-Xmx${ramMb}M`,
     `-Xms${Math.min(ramMb, 1024)}M`,
@@ -134,7 +139,17 @@ async function launch({ btaVersion, profile, ramMb, report = () => {} }) {
   const child = spawn(javaBin, jvmArgs, {
     cwd: gameDirPath,
     windowsHide: true,
+    // Give the game its own process group so closing the launcher doesn't take
+    // a running game down with it. Without this the JVM is a child in the
+    // launcher's group and dies with it -- losing whatever wasn't saved.
+    detached: true,
   });
+
+  // Stop the child's handle from keeping the launcher's event loop alive. The
+  // stdio pipes stay attached, so the console keeps receiving logs for as long
+  // as the launcher is open; once it's gone the game simply writes into a
+  // closed pipe and carries on.
+  child.unref();
 
   return child;
 }

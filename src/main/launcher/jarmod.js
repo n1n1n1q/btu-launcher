@@ -10,10 +10,15 @@ const crypto = require('node:crypto');
 const AdmZip = require('adm-zip');
 const paths = require('../paths');
 
+// Bump when the merge itself changes shape, so installs carrying a jar built
+// by an older (buggier) merge rebuild instead of reusing it. v2 kept directory
+// entries, without which BTA finds no language packs.
+const MERGE_FORMAT = 2;
+
 function mergedJarName(vanillaSha1, jarmodSha1) {
   const key = crypto
     .createHash('sha1')
-    .update(`${vanillaSha1}:${jarmodSha1}`)
+    .update(`${vanillaSha1}:${jarmodSha1}:v${MERGE_FORMAT}`)
     .digest('hex')
     .slice(0, 16);
   return `merged-${key}.jar`;
@@ -24,6 +29,7 @@ async function buildMergedJar(vanillaJarPath, vanillaSha1, jarmodJarPath, jarmod
   if (fs.existsSync(outPath)) return outPath;
 
   const entries = new Map(); // path -> Buffer
+  const directories = new Set(); // explicit directory entries, see below
 
   // Signature files reference exact original entry hashes -- once we start
   // overwriting entries the JVM will refuse to load the jar ("invalid
@@ -32,19 +38,27 @@ async function buildMergedJar(vanillaJarPath, vanillaSha1, jarmodJarPath, jarmod
   const isSignatureOrManifest = (entryName) =>
     entryName === 'META-INF/MANIFEST.MF' || /^META-INF\/.*\.(SF|RSA|DSA)$/i.test(entryName);
 
-  const base = new AdmZip(vanillaJarPath);
-  for (const entry of base.getEntries()) {
-    if (entry.isDirectory || isSignatureOrManifest(entry.entryName)) continue;
-    entries.set(entry.entryName, entry.getData());
-  }
+  const collect = (jarPath) => {
+    for (const entry of new AdmZip(jarPath).getEntries()) {
+      if (isSignatureOrManifest(entry.entryName)) continue;
+      // Directory entries carry no data but are NOT redundant: BTA enumerates
+      // its language packs by listing the directories under
+      // assets/minecraft/lang/, so a jar without them loads with every string
+      // untranslated ("gui.main_menu.button.singleplayer" in place of "Singleplayer").
+      if (entry.isDirectory) directories.add(entry.entryName);
+      else entries.set(entry.entryName, entry.getData()); // later jars win on conflict
+    }
+  };
 
-  const overlay = new AdmZip(jarmodJarPath);
-  for (const entry of overlay.getEntries()) {
-    if (entry.isDirectory || isSignatureOrManifest(entry.entryName)) continue;
-    entries.set(entry.entryName, entry.getData()); // BTA entries win on conflict
-  }
+  collect(vanillaJarPath);
+  collect(jarmodJarPath);
 
   const out = new AdmZip();
+  // Directories first, so every entry is preceded by its parent the way a
+  // normal archiver writes them.
+  for (const dir of [...directories].sort()) {
+    out.addFile(dir, Buffer.alloc(0));
+  }
   for (const [entryName, data] of entries) {
     out.addFile(entryName, data);
   }

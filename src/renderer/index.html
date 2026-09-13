@@ -7,63 +7,203 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="titlebar">BTU Launcher</div>
+  <!-- ---------- Title bar (custom; native frame is off) ---------- -->
+  <header class="titlebar" id="titlebar">
+    <div class="titlebar-brand">
+      <span class="logo-mark" aria-hidden="true"></span>
+      <span class="wordmark">BETTER WITH <b>UCUCRAFT</b></span>
+    </div>
+    <div class="titlebar-right">
+      <button class="icon-btn" id="settings-btn" data-i18n-title="settings.title">
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="8" cy="8" r="2.4" />
+          <path d="M8 1.4v1.8M8 12.8v1.8M1.4 8h1.8M12.8 8h1.8M3.3 3.3l1.3 1.3M11.4 11.4l1.3 1.3M12.7 3.3l-1.3 1.3M4.6 11.4l-1.3 1.3" />
+        </svg>
+      </button>
+      <div class="window-controls" id="window-controls">
+        <button class="win-btn" id="win-min" data-i18n-title="win.minimize">
+          <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6h8" /></svg>
+        </button>
+        <button class="win-btn" id="win-max" data-i18n-title="win.maximize">
+          <svg viewBox="0 0 12 12" aria-hidden="true"><rect x="2.5" y="2.5" width="7" height="7" rx="1" /></svg>
+        </button>
+        <button class="win-btn danger" id="win-close" data-i18n-title="win.close">
+          <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6" /></svg>
+        </button>
+      </div>
+    </div>
+  </header>
 
   <div class="layout">
+    <!-- ---------- Sidebar ---------- -->
     <aside class="sidebar">
-      <div class="card">
-        <div class="tabs">
-          <button class="tab-btn active" data-tab="microsoft">Microsoft</button>
-          <button class="tab-btn" data-tab="offline">Offline</button>
+      <section class="card" id="login-card">
+        <h2 class="card-title" data-i18n="account.title">Account</h2>
+        <div class="tabs" role="tablist">
+          <button class="tab-btn active" data-tab="microsoft" role="tab" data-i18n="account.microsoft">Microsoft</button>
+          <button class="tab-btn" data-tab="offline" role="tab" data-i18n="account.offline">Offline</button>
         </div>
 
-        <div id="tab-microsoft" style="margin-top:14px;">
-          <p class="status-line">Sign in with your real Microsoft / Minecraft account.</p>
-          <button class="primary" id="ms-login-btn" style="width:100%;">Sign in with Microsoft</button>
+        <div id="tab-microsoft" class="tab-panel">
+          <p class="hint" data-i18n="account.msHint">Sign in with your Microsoft / Minecraft account.</p>
+          <button class="btn block" id="ms-login-btn" data-i18n="account.msButton">Sign in with Microsoft</button>
         </div>
 
-        <div id="tab-offline" class="hidden" style="margin-top:14px;">
-          <label class="field-label" for="offline-username">Username</label>
-          <input type="text" id="offline-username" maxlength="16" placeholder="Steve" />
-          <button class="primary" id="offline-login-btn" style="width:100%; margin-top:10px;">Continue</button>
+        <div id="tab-offline" class="tab-panel hidden">
+          <label class="field-label" for="offline-username" data-i18n="account.username">Username</label>
+          <input type="text" id="offline-username" maxlength="16" placeholder="Steve" spellcheck="false" />
+          <button class="btn block" id="offline-login-btn" data-i18n="account.continue">Continue</button>
         </div>
-      </div>
+      </section>
 
-      <div class="card hidden" id="profile-card">
-        <label class="field-label">Signed in as</label>
-        <div class="profile-box">
-          <span id="profile-name">-</span>
-          <span class="badge" id="profile-badge">MODE</span>
+      <section class="card hidden" id="profile-card">
+        <h2 class="card-title" data-i18n="account.signedIn">Signed in</h2>
+        <div class="profile">
+          <span class="avatar" id="profile-avatar" aria-hidden="true">?</span>
+          <span class="profile-meta">
+            <span class="profile-name" id="profile-name">-</span>
+            <span class="badge" id="profile-badge">MODE</span>
+          </span>
         </div>
-        <button class="secondary" id="switch-account-btn" style="margin-top:10px; width:100%;">Switch account</button>
-      </div>
+        <button class="btn ghost block" id="switch-account-btn" data-i18n="account.switch">Switch account</button>
+      </section>
 
-      <div class="card">
-        <label class="field-label" for="ram-input">Allocated RAM (MB)</label>
-        <input type="number" id="ram-input" min="1024" step="256" />
-      </div>
+      <div class="spacer"></div>
 
-      <div style="flex:1;"></div>
-
-      <div class="card" id="updater-card">
-        <label class="field-label">Launcher</label>
-        <div class="status-line" id="updater-status">Up to date</div>
-      </div>
+      <section class="card meta-card">
+        <div class="meta-row">
+          <span class="meta-key" data-i18n="meta.modpack">Modpack</span>
+          <span class="meta-val" id="modpack-version">-</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-key" data-i18n="meta.bta">BTA</span>
+          <span class="meta-val" id="bta-version">-</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-key" data-i18n="meta.launcher">Launcher</span>
+          <span class="meta-val" id="updater-status">-</span>
+        </div>
+      </section>
     </aside>
 
+    <!-- ---------- Main ---------- -->
     <main class="main">
-      <div class="card">
-        <label class="field-label">Modpack</label>
-        <div class="status-line" id="modpack-status">Checking for updates...</div>
+      <section class="hero">
+        <div class="hero-texture" aria-hidden="true"></div>
+        <div class="hero-body">
+          <p class="hero-eyebrow" data-i18n="hero.eyebrow">Better than Adventure</p>
+          <h1 class="hero-title">BETTER WITH <span class="accent">UCUCRAFT</span></h1>
+          <p class="hero-sub" data-i18n="hero.sub">A survival Minecraft community where every season tells its own story.</p>
+          <p class="server-chip"><span class="dot" id="server-dot"></span><span id="server-address">-</span></p>
+        </div>
+      </section>
+
+      <section class="status-strip" id="modpack-status-row">
+        <span class="status-icon" id="modpack-icon"></span>
+        <span class="status-text" id="modpack-status"></span>
+      </section>
+
+      <div class="play-block">
+        <button class="btn play" id="play-btn" disabled>
+          <svg class="play-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5l9 5.5-9 5.5z" /></svg>
+          <span id="play-label">Sign in to play</span>
+        </button>
+        <div class="progress hidden" id="progress">
+          <div class="progress-bar" id="progress-bar"></div>
+        </div>
+        <p class="launch-status" id="launch-status"></p>
       </div>
 
-      <button class="primary" id="play-btn" disabled>Sign in to play</button>
-      <div class="status-line" id="launch-status"></div>
-
-      <div class="log" id="log"></div>
+      <section class="console" id="console">
+        <button class="console-toggle" id="log-toggle" aria-expanded="false">
+          <svg class="chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2l4 4-4 4" /></svg>
+          <span data-i18n="console.title">Console</span>
+          <span class="console-count" id="log-count">0</span>
+        </button>
+        <pre class="log hidden" id="log"></pre>
+      </section>
     </main>
   </div>
 
+  <!-- ---------- Settings dialog ---------- -->
+  <div class="modal-backdrop hidden" id="settings-backdrop"></div>
+  <div class="modal hidden" id="settings" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <header class="modal-head">
+      <h2 class="modal-title" id="settings-title" data-i18n="settings.title">Settings</h2>
+      <button class="win-btn" id="settings-close" data-i18n-title="settings.close">
+        <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6" /></svg>
+      </button>
+    </header>
+
+    <div class="modal-body">
+      <section class="settings-section">
+        <h3 class="card-title" data-i18n="settings.language">Language</h3>
+        <div class="lang-switch" id="lang-switch" role="group" aria-label="Language"></div>
+      </section>
+
+      <section class="settings-section">
+        <h3 class="card-title" data-i18n="memory.title">Memory</h3>
+        <div class="ram-row">
+          <input type="range" id="ram-range" min="1024" max="16384" step="512" />
+          <output class="ram-value" id="ram-value">-</output>
+        </div>
+        <p class="hint" id="ram-hint" data-i18n="memory.hint">Allocated to the game.</p>
+      </section>
+
+      <section class="settings-section" id="location-card">
+        <h2 class="card-title" data-i18n="location.title">Installation folder</h2>
+        <p class="path-box" id="data-dir" title="-">-</p>
+        <p class="hint" id="location-status"></p>
+        <div class="location-actions">
+          <button class="btn ghost" id="change-dir-btn" data-i18n="location.change">Change...</button>
+          <button class="btn ghost hidden" id="reset-dir-btn" data-i18n="location.reset">Default</button>
+        </div>
+      </section>
+
+      <section class="settings-section" id="reinstall-card">
+        <h3 class="card-title" data-i18n="reinstall.title">Reinstall</h3>
+        <p class="hint" data-i18n="reinstall.hint">Deletes downloaded files so the next launch fetches them again. Worlds, options and your server list are kept.</p>
+
+        <ul class="reset-list">
+          <li class="reset-row">
+            <label class="reset-label">
+              <input type="checkbox" data-group="game" checked />
+              <span data-i18n="reinstall.groupGame">Game files</span>
+            </label>
+            <span class="reset-size" id="size-game">-</span>
+          </li>
+          <li class="reset-row">
+            <label class="reset-label">
+              <input type="checkbox" data-group="runtime" checked />
+              <span data-i18n="reinstall.groupRuntime">Java runtime</span>
+            </label>
+            <span class="reset-size" id="size-runtime">-</span>
+          </li>
+          <li class="reset-row">
+            <label class="reset-label">
+              <input type="checkbox" data-group="modpack" checked />
+              <span data-i18n="reinstall.groupModpack">Modpack files</span>
+            </label>
+            <span class="reset-size" id="size-modpack">-</span>
+          </li>
+        </ul>
+
+        <button class="btn ghost block" id="reinstall-btn" data-i18n="reinstall.button">Reinstall selected</button>
+
+        <div class="confirm hidden" id="reinstall-confirm">
+          <p class="confirm-text" id="reinstall-confirm-text"></p>
+          <div class="confirm-actions">
+            <button class="btn danger" id="reinstall-yes" data-i18n="reinstall.confirmYes">Delete</button>
+            <button class="btn ghost" id="reinstall-no" data-i18n="reinstall.confirmNo">Cancel</button>
+          </div>
+        </div>
+
+        <p class="hint reset-result hidden" id="reinstall-result"></p>
+      </section>
+    </div>
+  </div>
+
+  <script src="i18n.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>

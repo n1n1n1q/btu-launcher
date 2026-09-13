@@ -4,18 +4,33 @@ directories:
   output: dist
 files:
   - src/**/*
+  - resources/**/*
   - package.json
 win:
   target:
     - target: nsis
       arch: [x64]
-  # icon: resources/icon.ico   # TODO: add a real icon before shipping
+  icon: resources/icon.png # electron-builder converts this to .ico at build time
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+mac:
+  target:
+    - target: dmg
+      arch: [x64, arm64] # Intel + Apple Silicon in one build pass
+  category: public.app-category.games
+  icon: resources/icon.png # electron-builder converts this to .icns at build time
+  hardenedRuntime: false # no code signing set up yet -- see docs/SETUP.md
+  identity: null # explicitly skip codesigning (would otherwise try to find a local cert)
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+  category: Game
+  icon: resources/icon.png
 publish:
   # Points electron-updater at a plain directory on your VPS. After
   # `npm run dist:win`, upload the whole dist/ folder's contents (the
   # installer + latest.yml) here. See docs/SETUP.md.
   provider: generic
-  url: https://updates.example.com/launcher/ # TODO: your real update URL
+  url: https://updates.ucucraft.fun/launcher/ # TODO: your real update URL

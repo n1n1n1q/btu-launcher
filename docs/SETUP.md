@@ -178,6 +178,17 @@ npm run dist:win
 
 Upload everything under `dist\` (the installer `.exe` + `latest.yml`) to `/var/www/updates/launcher/` the same way as part C. Existing installs then pick up the update automatically via electron-updater.
 
+### D3. Other OSes (macOS / Linux)
+
+`npm run dist:mac` and `npm run dist:linux` exist in `package.json`, and `electron-builder.yml` has `mac:`/`linux:` blocks (dmg for Intel+Apple Silicon, AppImage for Linux x64). The catch: **electron-builder builds for the OS it's running on** — you can't produce a `.dmg` from Windows. Options:
+
+- **GitHub Actions** (`.github/workflows/build.yml`, already in the repo): a workflow_dispatch-triggered matrix build that runs each `dist:*` script on its native runner (`windows-latest`/`macos-latest`/`ubuntu-latest`) and uploads the installers as build artifacts. Trigger it from the repo's Actions tab, or by pushing a `v*` tag. No secrets needed for this — it just builds, doesn't publish.
+- Alternatively, build on an actual Mac/Linux machine you have access to.
+
+Either way, once you have the `.dmg`/`.AppImage` + their `latest-mac.yml`/`latest-linux.yml`, upload them to `/var/www/updates/launcher/` alongside the Windows files — electron-updater picks the right metadata file per OS automatically from the same URL.
+
+Neither is code-signed (macOS Gatekeeper will warn on first open; that needs an Apple Developer account, out of scope for now).
+
 ---
 
 ## Testing checklist
@@ -187,9 +198,76 @@ Upload everything under `dist\` (the installer `.exe` + `latest.yml`) to `/var/w
 - [ ] Offline login → Play → mods actually appear under the instance's `mods/` folder after first launch
 - [ ] Microsoft login opens the sign-in popup instead of "not configured yet"
 - [ ] Your main website still loads normally (confirms the nginx change was additive, not disruptive)
+- [ ] Sidebar "Reinstall" shows non-zero sizes after a first launch, and a wipe → Play re-downloads cleanly
+
+## Repairing a broken install
+
+Everything below lives in the **Settings** dialog — the gear in the title bar,
+which also holds the language toggle and the memory slider.
+
+The launcher verifies every download against a published hash, so a corrupt
+file normally repairs itself on the next launch. When something survives that
+anyway — a half-written JRE, a mod folder edited by hand — **Reinstall**
+deletes the launcher's own downloaded content so the next Play fetches it
+again. Three independently selectable groups:
+
+| Group | What it deletes |
+| --- | --- |
+| Game files | the whole `content/` cache (downloads, jars, libraries, assets, meta) and the instance's `natives/` |
+| Java runtime | the bundled Temurin JRE under `jre/` |
+| Modpack files | only the folders the manifest owns (`mods/`, `config/`, `coremods/`, `datapacks/`, `discpack/`, `resourcepacks/`) |
+
+**Player data is never in scope.** Worlds, `options.txt`, `servers_new.dat` and
+`screenshots/` sit directly in the instance's `minecraft/` dir and no target
+resolves to that directory or to anything above it. A reinstall is refused
+while the game is running or a launch is mid-download.
+
+### Why the cache is called `content/`, not `cache/`
+
+Electron reserves `userData/Cache` for Chromium's own HTTP cache. On Windows and
+macOS the filesystem is case-insensitive, so an innocuous-looking
+`userData/cache` is *the same directory* — and the launcher's jars, libraries
+and assets ended up sitting next to Chromium's `Cache_Data`, in a folder
+Chromium owns and is free to evict, truncate or clear at any time.
+
+That produced downloads which verified correctly in flight and were then
+silently rewritten on disk, surfacing much later as unzip failures on files
+that had been fine when written (`invalid block type`, `unexpected end of
+file`). `paths.cacheRoot()` is therefore `userData/content`, well clear of
+anything Electron claims. On startup `maintenance.purgeLegacyCache()` deletes
+the launcher's old subdirectories from the shared location — and only those,
+never `Cache_Data`.
+
+Two consequences worth preserving if you touch `src/main/launcher/downloader.js`:
+a download is verified **by reading the finished file back from disk**, not just
+by hashing the network stream (hashing the stream proves the transfer, not the
+write), and a failed verification retries up to three times.
+
+## Moving the installation to another drive
+
+Settings → **Installation folder** → Change. The launcher creates a
+`BTU Launcher` folder inside whatever directory is picked and moves `content/`,
+`instances/` and `jre/` into it, recording the choice as `dataDir` in the
+settings file. The settings file itself always stays in `userData` — it's what
+records the pointer, so it can't live at the end of it.
+
+The move copies everything and verifies each directory's size before deleting a
+single original, so an interrupted move cannot lose a world. It is refused
+while the game is running or a launch is mid-download, and refused if the
+chosen folder is inside the current one.
+
+### If a download reports "corrupted on write"
+
+This means the bytes arrived over the network correctly (the stream hash
+matched) but what landed on disk did not, on three consecutive attempts. The
+launcher discards it rather than caching a broken file, which is the intended
+behaviour — but the cause is environmental, not a launcher bug. The first thing
+to try is excluding the data directory from real-time antivirus scanning
+(Windows Security → Virus & threat protection → Exclusions), since on-access
+scanners are the usual explanation for a file changing between write and read.
 
 ## Known gaps / follow-ups
 
-- **Server not pre-added to the multiplayer list.** Vanilla b1.7.3 has no "auto-join" launch flag; players add your server once via the in-game Multiplayer screen. A follow-up (writing the server into `servers_new.dat` on first launch) is a small addition to `src/main/launcher/gameLauncher.js` — not done yet.
-- **No icon set.** `resources/icon.ico` is referenced but not created.
+- ~~**Server not pre-added to the multiplayer list.**~~ Done: `src/main/launcher/serverList.js` writes the `serverAddress` config value into `<gameDir>/servers_new.dat` (gzipped NBT, in this client's own UUID-keyed `ServerData`/`History`/`Favorites` format — not vanilla's flat `servers.dat` list) the first time an instance's game dir is prepared, in `gameLauncher.js`'s `ensureInstanceFiles()`. It only ever creates that file — if it already exists (including a fresh one Minecraft itself just wrote), the player's own list is left untouched.
+- ~~**No icon set.**~~ Done: `image.png` is converted to `resources/icon.ico` / `.icns` / `.png` and wired into `electron-builder.yml`.
 - **macOS.** Auth and update flows are already OS-agnostic; the gaps are `src/main/launcher/java.js`'s macOS JRE archive layout (Adoptium's macOS zips nest under `Contents/Home`) and an electron-builder `mac:` block.
