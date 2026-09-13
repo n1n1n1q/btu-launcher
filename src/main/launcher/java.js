@@ -21,6 +21,32 @@ const execFileAsync = promisify(execFile);
 const ADOPTIUM_OS = { win32: 'windows', darwin: 'mac', linux: 'linux' }[process.platform];
 const ADOPTIUM_ARCH = { x64: 'x64', arm64: 'aarch64' }[process.arch] || 'x64';
 
+// Adoptium publishes .zip for Windows but .tar.gz for Linux and macOS. Feeding
+// a gzip stream to AdmZip yields "Invalid or unsupported zip format. No END
+// header found" -- and because the file's own sha256 is correct, ensureFile()
+// caches it and every retry replays the same failure.
+function archiveKind(pkg) {
+  const name = String((pkg && (pkg.name || pkg.link)) || '').toLowerCase();
+  if (name.endsWith('.tar.gz') || name.endsWith('.tgz')) return 'tar';
+  if (name.endsWith('.zip')) return 'zip';
+  return null;
+}
+
+async function extractArchive(archivePath, kind, extractDir) {
+  if (kind === 'zip') {
+    const zip = new AdmZip(archivePath);
+    zip.extractAllTo(extractDir, true);
+    return;
+  }
+  if (kind !== 'tar') {
+    throw new Error(`Unsupported Java archive format: ${archivePath}`);
+  }
+  // The archive holds one top-level directory (e.g. jdk-17.0.20.1+1-jre);
+  // --strip-components=1 drops it so javawPath()'s fixed bin/ layout holds
+  // straight away. tar preserves the executable bits on bin/java.
+  await execFileAsync('tar', ['-xzf', archivePath, '-C', extractDir, '--strip-components=1']);
+}
+
 function javawPath() {
   const exe = process.platform === 'win32' ? 'javaw.exe' : 'java';
   return path.join(paths.javaDir(), '17', 'bin', exe);
@@ -51,22 +77,40 @@ async function ensureJava17(onProgress) {
     throw new Error(`No managed Java download available for platform "${process.platform}" yet.`);
   }
 
-  const apiUrl = `https://api.adoptium.net/v3/assets/latest/17/hotspot?os=${ADOPTIUM_OS}&arch=${ADOPTIUM_ARCH}&image_type=jre&vendor=eclipse`;
+  // NB: the parameter is "architecture" -- "arch" is silently ignored, and the
+  // endpoint then answers with every architecture it has, aarch64 first, so
+  // releases[0] handed an x64 machine an ARM JRE that could never execute.
+  const apiUrl =
+    `https://api.adoptium.net/v3/assets/latest/17/hotspot` +
+    `?os=${ADOPTIUM_OS}&architecture=${ADOPTIUM_ARCH}&image_type=jre&vendor=eclipse`;
   const releases = await fetchJson(apiUrl);
   if (!releases || !releases.length) {
     throw new Error('Could not find a Java 17 JRE release from Adoptium for this platform.');
   }
-  const binary = releases[0].binary;
-  const archiveUrl = binary.package.link;
-  const archivePath = path.join(paths.cacheRoot(), 'downloads', `jre17-${ADOPTIUM_ARCH}.zip`);
+  const release = releases.find((r) => r && r.binary && r.binary.architecture === ADOPTIUM_ARCH);
+  const binary = (release || releases[0]).binary;
+  const pkg = binary.package;
+  const kind = archiveKind(pkg);
+  if (!kind) {
+    throw new Error(
+      `Adoptium returned an unusable Java archive (${pkg.name || pkg.link}). ` +
+        'Only .zip and .tar.gz are supported.'
+    );
+  }
+  const archiveUrl = pkg.link;
+  const archivePath = path.join(
+    paths.cacheRoot(),
+    'downloads',
+    `jre17-${ADOPTIUM_ARCH}.${kind === 'tar' ? 'tar.gz' : 'zip'}`
+  );
 
   await ensureFile(archiveUrl, archivePath, {
     // Adoptium publishes sha256 rather than sha1. Verify it: a size-only check
     // passes a download that arrived complete in length but corrupt in content,
     // and because the size keeps matching, that bad archive is then cached
     // forever and every launch fails identically on extraction.
-    sha256: binary.package.checksum,
-    size: binary.package.size,
+    sha256: pkg.checksum,
+    size: pkg.size,
     onProgress,
   });
 
@@ -74,8 +118,7 @@ async function ensureJava17(onProgress) {
   await fsp.rm(extractDir, { recursive: true, force: true });
   await fsp.mkdir(extractDir, { recursive: true });
   try {
-    const zip = new AdmZip(archivePath);
-    zip.extractAllTo(extractDir, true);
+    await extractArchive(archivePath, kind, extractDir);
   } catch (err) {
     // Bin both the archive and the half-extracted tree so the next attempt
     // re-downloads instead of replaying the same failure, and say which step
@@ -88,8 +131,8 @@ async function ensureJava17(onProgress) {
     );
   }
 
-  // Adoptium zips contain one top-level folder (e.g. jdk-17.0.13+11-jre) --
-  // flatten it so javawPath()'s fixed layout holds.
+  // Zip archives (Windows) still carry one top-level folder
+  // (e.g. jdk-17.0.13+11-jre) -- flatten it so javawPath()'s fixed layout holds.
   const entries = await fsp.readdir(extractDir);
   if (entries.length === 1) {
     const inner = path.join(extractDir, entries[0]);
