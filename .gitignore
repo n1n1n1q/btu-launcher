@@ -1,0 +1,13 @@
+node_modules/
+dist/
+out/
+build/
+*.log
+.DS_Store
+Thumbs.db
+
+# Local launcher runtime data (instances, downloaded game files, caches)
+.btu-dev-data/
+
+# Anything staged for publishing an update (large binaries, mod jars)
+update-staging/

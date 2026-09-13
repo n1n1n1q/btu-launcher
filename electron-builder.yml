@@ -1,0 +1,21 @@
+appId: net.btu.launcher
+productName: BTU Launcher
+directories:
+  output: dist
+files:
+  - src/**/*
+  - package.json
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  # icon: resources/icon.ico   # TODO: add a real icon before shipping
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+publish:
+  # Points electron-updater at a plain directory on your VPS. After
+  # `npm run dist:win`, upload the whole dist/ folder's contents (the
+  # installer + latest.yml) here. See docs/SETUP.md.
+  provider: generic
+  url: https://updates.example.com/launcher/ # TODO: your real update URL

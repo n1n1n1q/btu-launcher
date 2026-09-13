@@ -1,0 +1,26 @@
+{
+  "name": "btu-launcher",
+  "productName": "BTU Launcher",
+  "version": "0.1.0",
+  "description": "Custom launcher for the BTU Minecraft server (Better Than Adventure based), with Microsoft + offline login and self-updating modpack support.",
+  "private": true,
+  "main": "src/main/index.js",
+  "author": "basys",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "publish-update": "node tools/publish-update.js"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.16",
+    "electron-store": "^8.2.0",
+    "electron-updater": "^6.3.9",
+    "msmc": "^5.0.5"
+  },
+  "devDependencies": {
+    "electron": "^32.2.0",
+    "electron-builder": "^25.1.8"
+  }
+}

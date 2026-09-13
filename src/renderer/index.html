@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
+  <title>BTU Launcher</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="titlebar">BTU Launcher</div>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="card">
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="microsoft">Microsoft</button>
+          <button class="tab-btn" data-tab="offline">Offline</button>
+        </div>
+
+        <div id="tab-microsoft" style="margin-top:14px;">
+          <p class="status-line">Sign in with your real Microsoft / Minecraft account.</p>
+          <button class="primary" id="ms-login-btn" style="width:100%;">Sign in with Microsoft</button>
+        </div>
+
+        <div id="tab-offline" class="hidden" style="margin-top:14px;">
+          <label class="field-label" for="offline-username">Username</label>
+          <input type="text" id="offline-username" maxlength="16" placeholder="Steve" />
+          <button class="primary" id="offline-login-btn" style="width:100%; margin-top:10px;">Continue</button>
+        </div>
+      </div>
+
+      <div class="card hidden" id="profile-card">
+        <label class="field-label">Signed in as</label>
+        <div class="profile-box">
+          <span id="profile-name">-</span>
+          <span class="badge" id="profile-badge">MODE</span>
+        </div>
+        <button class="secondary" id="switch-account-btn" style="margin-top:10px; width:100%;">Switch account</button>
+      </div>
+
+      <div class="card">
+        <label class="field-label" for="ram-input">Allocated RAM (MB)</label>
+        <input type="number" id="ram-input" min="1024" step="256" />
+      </div>
+
+      <div style="flex:1;"></div>
+
+      <div class="card" id="updater-card">
+        <label class="field-label">Launcher</label>
+        <div class="status-line" id="updater-status">Up to date</div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="card">
+        <label class="field-label">Modpack</label>
+        <div class="status-line" id="modpack-status">Checking for updates...</div>
+      </div>
+
+      <button class="primary" id="play-btn" disabled>Sign in to play</button>
+      <div class="status-line" id="launch-status"></div>
+
+      <div class="log" id="log"></div>
+    </main>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
