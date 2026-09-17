@@ -74,7 +74,15 @@ function ensureFile(url, destPath, options = {}) {
 // A failed hash check means the bytes we have are wrong, and the next attempt
 // starts from scratch (the temp file is already gone), so retrying is the whole
 // repair strategy -- both for a flaky connection and for a bad write.
-const MAX_ATTEMPTS = 3;
+//
+// The backoff needs to span several seconds, not under two: a Windows network
+// adapter changing profile (e.g. a VPN/virtual NIC flapping between "None" and
+// "Public") can leave DNS briefly unresolvable for a few seconds, and 3
+// attempts 400/800ms apart (~1.2s total) doesn't survive that -- it was
+// observed failing every attempt during exactly such a flap while a plain
+// `nslookup`/curl right after succeeded instantly. 6 attempts with backoff up
+// to 6.4s covers that without making a genuinely broken URL hang forever.
+const MAX_ATTEMPTS = 6;
 
 async function withRetry(attempt) {
   let lastError;
@@ -83,7 +91,7 @@ async function withRetry(attempt) {
       return await attempt();
     } catch (err) {
       lastError = err;
-      if (i < MAX_ATTEMPTS) await new Promise((r) => setTimeout(r, 400 * i));
+      if (i < MAX_ATTEMPTS) await new Promise((r) => setTimeout(r, Math.min(6400, 400 * 2 ** (i - 1))));
     }
   }
   throw lastError;
@@ -94,7 +102,7 @@ async function downloadToFile(url, destPath, { sha1, sha256, size, onProgress } 
   if (await fileMatches(destPath, { sha1, sha256, size })) return { skipped: true };
 
   await fsp.mkdir(path.dirname(destPath), { recursive: true });
-  const res = await fetch(url);
+  const res = await fetchOrExplain(url);
   if (!res.ok) {
     throw new Error(`Download failed (${res.status} ${res.statusText}): ${url}`);
   }
@@ -138,6 +146,16 @@ async function downloadToFile(url, destPath, { sha1, sha256, size, onProgress } 
     // A dropped connection shouldn't leave a stray temp file behind, and since
     // the temp name is unique nothing else will ever pick it up.
     await fsp.unlink(partPath).catch(() => {});
+    // Unlike the initial fetch() above, undici reports a connection that dies
+    // *mid-transfer* as a bare `TypeError: terminated` with no URL or cause in
+    // the message -- surface where and how far it got so it's actionable
+    // instead of a mystery word.
+    if (err instanceof TypeError) {
+      throw new Error(
+        `Connection dropped while downloading ${url} (${downloaded}/${total || '?'} bytes): ${err.message}`,
+        { cause: err }
+      );
+    }
     throw err;
   }
 
@@ -187,8 +205,24 @@ async function pool(items, worker, concurrency = 8) {
   await Promise.all(runners);
 }
 
+// Node's fetch() throws a bare `TypeError: fetch failed` for anything that
+// stops the connection from ever being made (DNS failure, refused connection,
+// TLS/certificate error, proxy trouble, ...) -- the actual reason is on
+// `err.cause`, not in `.message`, and the UI only ever shows `.message`. Fold
+// the cause into the message so it's visible where the error is finally
+// displayed instead of being swallowed.
+async function fetchOrExplain(url) {
+  try {
+    return await fetch(url);
+  } catch (err) {
+    const cause = err && err.cause;
+    const reason = cause ? cause.code || cause.message || String(cause) : err.message;
+    throw new Error(`Could not reach ${url}${reason ? ` (${reason})` : ''}`, { cause: err });
+  }
+}
+
 async function fetchJson(url) {
-  const res = await fetch(url);
+  const res = await fetchOrExplain(url);
   if (!res.ok) throw new Error(`Failed to fetch ${url}: ${res.status} ${res.statusText}`);
   return res.json();
 }
