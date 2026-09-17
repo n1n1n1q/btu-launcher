@@ -222,6 +222,12 @@ Either way, once you have the `.dmg`/`.AppImage` + their `latest-mac.yml`/`lates
 
 Neither is code-signed (macOS Gatekeeper will warn on first open; that needs an Apple Developer account, out of scope for now).
 
+### D4. The public downloads page
+
+The above publishes to `updates.*` for electron-updater's in-app self-update check. Publishing the
+same installers to the human-facing download buttons on ucucraft.fun is a separate job
+(`publish-downloads` in the same workflow) — see [PUBLISHING.md](PUBLISHING.md) for that contract.
+
 ---
 
 ## Testing checklist

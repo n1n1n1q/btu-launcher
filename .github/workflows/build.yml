@@ -76,3 +76,96 @@ jobs:
           rsync -av \
             -e "ssh -i ~/.ssh/deploy_key -o UserKnownHostsFile=~/.ssh/known_hosts" \
             dist/ ubuntu@130.61.179.91:/var/www/updates/launcher/
+
+  # Publishes the same installers to the public ucucraft.fun downloads page
+  # (a different concern from `deploy` above, which feeds electron-updater's
+  # own self-update check) -- see docs/PUBLISHING.md for the full contract
+  # this job implements.
+  publish-downloads:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all built installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: btu-launcher-*
+          path: dist
+          merge-multiple: true
+
+      - name: Build releases.json
+        run: |
+          set -euo pipefail
+          cd dist
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          WIN=$(ls *windows-x86_64*.exe)
+          MAC_ARM=$(ls *macos-arm64*.dmg)
+          MAC_X64=$(ls *macos-x64*.dmg)
+          LINUX=$(ls *linux-x86_64*.AppImage)
+
+          # electron-builder embeds package.json's version in these
+          # filenames, which won't match $VERSION if the tag and
+          # package.json drifted apart -- not fatal (files are still found
+          # by their fixed suffix above), but worth a loud heads-up rather
+          # than a silently mislabeled release.
+          for f in "$WIN" "$MAC_ARM" "$MAC_X64" "$LINUX"; do
+            case "$f" in *"$VERSION"*) ;; *)
+              echo "::warning::$f doesn't contain tag version $VERSION -- bump package.json's version to match before tagging next time." ;;
+            esac
+          done
+
+          entry() {
+            jq -n --arg url "downloads/$1" \
+                  --argjson size "$(stat -c%s "$1")" \
+                  --arg sha "$(sha256sum "$1" | cut -d' ' -f1)" \
+                  '{url: $url, size: $size, sha256: $sha}'
+          }
+
+          jq -n \
+            --arg version "$VERSION" \
+            --arg released "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --argjson win "$(entry "$WIN")" \
+            --argjson macarm "$(entry "$MAC_ARM")" \
+            --argjson macx64 "$(entry "$MAC_X64")" \
+            --argjson linux "$(entry "$LINUX")" \
+            '{version: $version, released: $released,
+              builds: {"windows-x86_64": $win,
+                       "macos-arm64": $macarm,
+                       "macos-x86_64": $macx64,
+                       "linux-x86_64": $linux}}' > releases.json
+
+          jq . releases.json # fails the job if the JSON came out malformed
+
+      - name: Set up deploy key
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.UCUCRAFT_SSH_KEY }}" > ~/.ssh/ucucraft_key
+          chmod 600 ~/.ssh/ucucraft_key
+          # Pinned to the actual server host key, same as the deploy job
+          # above (both currently the same physical box).
+          cat >> ~/.ssh/known_hosts <<'EOF'
+          130.61.179.91 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBasx0WrhjGWtWn1AoB3tVsOAp/O2CA/iJFhWVfFJVZU
+          EOF
+
+      - name: Upload binaries, then the manifest
+        env:
+          HOST: ${{ secrets.UCUCRAFT_SSH_HOST }}
+          USER: ${{ secrets.UCUCRAFT_SSH_USER }}
+          PORT: ${{ secrets.UCUCRAFT_SSH_PORT || '22' }}
+        run: |
+          set -euo pipefail
+          SSH="ssh -p $PORT -i ~/.ssh/ucucraft_key -o UserKnownHostsFile=~/.ssh/known_hosts"
+          SITE=/home/ubuntu/ucucraft-site/public
+
+          # 1. binaries first -- see docs/PUBLISHING.md #3 for why the order
+          #    matters (the page can fetch the manifest mid-deploy).
+          rsync -av -e "$SSH" \
+            --exclude releases.json \
+            dist/ "$USER@$HOST:$SITE/downloads/"
+
+          # 2. manifest last, atomically: upload to a temp name, then mv
+          #    in place so a visitor never sees a half-written file.
+          rsync -av -e "$SSH" dist/releases.json "$USER@$HOST:$SITE/data/releases.json.tmp"
+          $SSH "$USER@$HOST" "mv $SITE/data/releases.json.tmp $SITE/data/releases.json"
