@@ -166,6 +166,39 @@ curl https://updates.yourdomain.com/modpack/manifest.json
 
 Separate from the modpack — this only needs doing when the launcher's *code* changes, not its content.
 
+### D0. Automatic (CI) — the normal path
+
+`.github/workflows/build.yml` has a `deploy` job that runs after a successful
+build and rsyncs every installer straight to `/var/www/updates/launcher/` on
+the update server. It only fires for a pushed `v*` tag (a `workflow_dispatch`
+run off a branch still just builds artifacts, same as before):
+
+```powershell
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+One-time setup, already done for `ubuntu@130.61.179.91`:
+
+1. A dedicated key pair was generated for CI (not your personal key) and its
+   public half appended to the server's `~/.ssh/authorized_keys`.
+2. The server's `/var/www/updates/launcher/` needs to be group-writable by
+   `ubuntu` (it's owned by `www-data` from Part A2). Run once on the VPS:
+   ```bash
+   sudo usermod -aG www-data ubuntu
+   sudo chmod -R g+w /var/www/updates/launcher
+   sudo chmod g+s /var/www/updates/launcher   # new uploads keep the www-data group
+   ```
+   Log out/in (or just start a new SSH session) after `usermod` for the group
+   change to take effect.
+3. The private half of the CI key pair needs to be added as a repository
+   secret named `DEPLOY_SSH_KEY`: GitHub repo → **Settings → Secrets and
+   variables → Actions → New repository secret**. Paste the *private* key
+   file's contents (the one **without** `.pub`) as the value.
+
+Steps D1/D2 below are the manual fallback — still useful for a one-off build,
+or if you'd rather not wire up CI secrets.
+
 ### D1. Build
 
 ```powershell
