@@ -22,7 +22,10 @@ nsis:
 mac:
   target:
     - target: dmg
-      arch: [x64, arm64] # Intel + Apple Silicon in one build pass
+      # Both by default -- what a local `npm run dist:mac` builds. CI splits
+      # these into two parallel macos-latest jobs instead (see build.yml),
+      # each passing --x64/--arm64 to build just one arch and finish sooner.
+      arch: [x64, arm64]
   category: public.app-category.games
   icon: resources/icon.png # electron-builder converts this to .icns at build time
   hardenedRuntime: false # no code signing set up yet -- see docs/SETUP.md

@@ -1,9 +1,10 @@
 name: Build launcher
 
-# Builds the launcher for all three OSes. electron-builder needs to run on
-# (or emulate) the OS it's targeting -- macOS builds in particular basically
-# require real macOS -- so this uses GitHub's hosted runners instead of
-# building locally. See docs/SETUP.md Part D for the full picture.
+# Builds the launcher for all three OSes (four jobs: macOS splits into
+# separate arm64/x64 runners, see the matrix below). electron-builder needs
+# to run on (or emulate) the OS it's targeting -- macOS builds in particular
+# basically require real macOS -- so this uses GitHub's hosted runners
+# instead of building locally. See docs/SETUP.md Part D for the full picture.
 on:
   workflow_dispatch: {}
   push:
@@ -15,12 +16,24 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: windows-latest
-            script: dist:win
-          - os: macos-latest
-            script: dist:mac
-          - os: ubuntu-latest
-            script: dist:linux
+          - name: windows
+            os: windows-latest
+            buildCmd: npm run dist:win
+          # Split into two parallel macos-latest runners instead of one job
+          # building both archs (electron-builder.yml's mac.arch default) --
+          # each finishes sooner, and it's what the downloads page needs
+          # anyway (two distinctly-named dmgs). The `deploy` job below has to
+          # specifically account for this: each run produces its own
+          # latest-mac.yml describing only its one dmg.
+          - name: macos-arm64
+            os: macos-latest
+            buildCmd: npx electron-builder --mac --arm64
+          - name: macos-x64
+            os: macos-latest
+            buildCmd: npx electron-builder --mac --x64
+          - name: linux
+            os: ubuntu-latest
+            buildCmd: npm run dist:linux
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -28,10 +41,10 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
-      - run: npm run ${{ matrix.script }}
+      - run: ${{ matrix.buildCmd }}
       - uses: actions/upload-artifact@v4
         with:
-          name: btu-launcher-${{ matrix.os }}
+          name: btu-launcher-${{ matrix.name }}
           # electron-builder's actual installer/output files, not the whole
           # dist/ tree (which also has unpacked build junk).
           path: |
@@ -55,8 +68,35 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           pattern: btu-launcher-*
-          path: dist
-          merge-multiple: true
+          path: artifacts
+
+      - name: Flatten installers and merge mac update metadata
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # Every other file has a unique name per job (electron-builder.yml's
+          # artifactName templates), so it's safe to flatten those straight
+          # across. latest-mac.yml is the one exception -- both macos-arm64
+          # and macos-x64 jobs produce a file with that exact same name.
+          find artifacts -type f ! -name 'latest-mac.yml' -exec cp {} dist/ \;
+
+          # electron-updater's MacUpdater reads latest-mac.yml's `files:`
+          # list and picks the entry whose url matches the running app's
+          # arch. Each job's own latest-mac.yml only lists its one dmg, so
+          # naively copying both to the same filename (last one wins) would
+          # silently break auto-update for whichever arch lost -- merge their
+          # `files:` arrays into one instead.
+          ARM_YML=artifacts/btu-launcher-macos-arm64/latest-mac.yml
+          X64_YML=artifacts/btu-launcher-macos-x64/latest-mac.yml
+          npm install --no-save --no-audit --no-fund js-yaml@4
+          node -e "
+            const fs = require('fs');
+            const yaml = require('js-yaml');
+            const arm = yaml.load(fs.readFileSync('$ARM_YML', 'utf8'));
+            const x64 = yaml.load(fs.readFileSync('$X64_YML', 'utf8'));
+            arm.files = [...arm.files, ...x64.files];
+            fs.writeFileSync('dist/latest-mac.yml', yaml.dump(arm));
+          "
 
       - name: Set up deploy key
         run: |
@@ -160,9 +200,13 @@ jobs:
           SITE=/home/ubuntu/ucucraft-site/public
 
           # 1. binaries first -- see docs/PUBLISHING.md #3 for why the order
-          #    matters (the page can fetch the manifest mid-deploy).
+          #    matters (the page can fetch the manifest mid-deploy). dist/
+          #    also has electron-updater's own *.yml/*.blockmap metadata
+          #    (that's for the deploy job's update server, not this site) and
+          #    releases.json itself -- none of those belong in the public
+          #    downloads folder.
           rsync -av -e "$SSH" \
-            --exclude releases.json \
+            --exclude '*.yml' --exclude '*.blockmap' --exclude releases.json \
             dist/ "$USER@$HOST:$SITE/downloads/"
 
           # 2. manifest last, atomically: upload to a temp name, then mv
