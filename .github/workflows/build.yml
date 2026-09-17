@@ -41,3 +41,38 @@ jobs:
             dist/*.yml
             dist/*.blockmap
           if-no-files-found: ignore
+
+  # Pushes every installer built above to the update server, completing
+  # docs/SETUP.md Part D without a manual scp. Only runs for an actual
+  # release (a pushed v* tag) -- a workflow_dispatch run off a branch still
+  # just builds artifacts for inspection, same as before.
+  deploy:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all built installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: btu-launcher-*
+          path: dist
+          merge-multiple: true
+
+      - name: Set up deploy key
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Pinned to the update server's actual host key (see docs/SETUP.md
+          # Part D2) rather than ssh-keyscan-on-the-fly, so a run can't be
+          # quietly pointed at a different host.
+          cat >> ~/.ssh/known_hosts <<'EOF'
+          130.61.179.91 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBasx0WrhjGWtWn1AoB3tVsOAp/O2CA/iJFhWVfFJVZU
+          EOF
+
+      - name: Upload installers to updates.* /launcher/
+        run: |
+          rsync -av \
+            -e "ssh -i ~/.ssh/deploy_key -o UserKnownHostsFile=~/.ssh/known_hosts" \
+            dist/ ubuntu@130.61.179.91:/var/www/updates/launcher/
