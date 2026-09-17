@@ -113,7 +113,13 @@ jobs:
 
       - name: Upload installers to updates.* /launcher/
         run: |
-          rsync -av \
+          # --no-owner --no-group: -a tries to chgrp the destination to match
+          # the runner's own (arbitrary) uid/gid, which ubuntu has no
+          # permission to do -- failed with "Operation not permitted" even
+          # though every file transferred correctly. We only need the files
+          # readable as the existing www-data group (already handled by
+          # SETUP.md's setgid bit), not owner/group actually mirrored.
+          rsync -av --no-owner --no-group \
             -e "ssh -i ~/.ssh/deploy_key -o UserKnownHostsFile=~/.ssh/known_hosts" \
             dist/ ubuntu@130.61.179.91:/var/www/updates/launcher/
 
@@ -205,11 +211,13 @@ jobs:
           #    (that's for the deploy job's update server, not this site) and
           #    releases.json itself -- none of those belong in the public
           #    downloads folder.
-          rsync -av -e "$SSH" \
+          # --no-owner --no-group: see the equivalent note in the deploy job
+          # above -- ubuntu can't chgrp to the runner's own uid/gid.
+          rsync -av --no-owner --no-group -e "$SSH" \
             --exclude '*.yml' --exclude '*.blockmap' --exclude releases.json \
             dist/ "$USER@$HOST:$SITE/downloads/"
 
           # 2. manifest last, atomically: upload to a temp name, then mv
           #    in place so a visitor never sees a half-written file.
-          rsync -av -e "$SSH" dist/releases.json "$USER@$HOST:$SITE/data/releases.json.tmp"
+          rsync -av --no-owner --no-group -e "$SSH" dist/releases.json "$USER@$HOST:$SITE/data/releases.json.tmp"
           $SSH "$USER@$HOST" "mv $SITE/data/releases.json.tmp $SITE/data/releases.json"
