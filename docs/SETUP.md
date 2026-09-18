@@ -231,7 +231,7 @@ Upload everything under `dist\` (the installer `.exe` + `latest.yml`) to `/var/w
 
 Either way, once you have the `.dmg`/`.AppImage` + their `latest-mac.yml`/`latest-linux.yml`, upload them to `/var/www/updates/launcher/` alongside the Windows files — electron-updater picks the right metadata file per OS automatically from the same URL.
 
-Neither is code-signed (macOS Gatekeeper will warn on first open; that needs an Apple Developer account, out of scope for now).
+Neither is code-signed with a real Apple Developer certificate (out of scope for now), so Gatekeeper will warn on first open — right-click → Open bypasses it. The mac build does get ad-hoc signed (`tools/afterPack-mac-adhoc-sign.js`, wired up as electron-builder's `afterPack` hook) since without even that, Apple Silicon refuses to launch the app at all ("App is damaged and can't be opened") rather than just warning.
 
 ### D4. The public downloads page
 

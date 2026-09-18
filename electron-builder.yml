@@ -6,6 +6,12 @@ files:
   - src/**/*
   - resources/**/*
   - package.json
+# Ad-hoc signs the mac .app after packaging -- see the comment in the script
+# for why: mac.identity: null below skips electron-builder's own signing (and
+# with it the more commonly-used `afterSign` hook, which electron-builder
+# itself skips when nothing was signed), but Apple Silicon won't launch a
+# completely unsigned app at all. No-op on win/linux.
+afterPack: tools/afterPack-mac-adhoc-sign.js
 win:
   target:
     - target: nsis
