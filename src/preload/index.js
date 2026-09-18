@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('btu', {
   },
   updater: {
     onStatus: (cb) => ipcRenderer.on('updater:status', (_e, p) => cb(p)),
+    check: () => ipcRenderer.invoke('updater:check'),
   },
   maintenance: {
     usage: () => ipcRenderer.invoke('maintenance:usage'),

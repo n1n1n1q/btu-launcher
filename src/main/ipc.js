@@ -1,10 +1,11 @@
 // All main<->renderer wiring lives here so index.js stays a thin bootstrap.
-const { ipcMain, dialog } = require('electron');
+const { app, ipcMain, dialog } = require('electron');
 const config = require('./config');
 const offlineAuth = require('./auth/offline');
 const msAuth = require('./auth/microsoft');
 const { launch } = require('./launcher/gameLauncher');
 const { fetchManifest, applyUpdate } = require('./updater/modpack');
+const { autoUpdater } = require('./updater/selfUpdate');
 const maintenance = require('./maintenance');
 const paths = require('./paths');
 
@@ -77,6 +78,24 @@ function registerIpc(win) {
     return applyUpdate(manifest, gameDirPath, (progress) =>
       send(win, 'modpack:update-progress', progress)
     );
+  });
+
+  // Manual trigger for the same self-updater that runs once at startup
+  // (see index.js). Status still arrives to the renderer only via the
+  // 'updater:status' events initSelfUpdater already wires up -- this handler
+  // just kicks a check off and surfaces the one failure mode that isn't a
+  // normal updater error: running unpackaged, where electron-updater has no
+  // publish feed to check at all.
+  ipcMain.handle('updater:check', async () => {
+    if (!app.isPackaged) {
+      throw new Error('Update checks only run in a packaged build.');
+    }
+    try {
+      await autoUpdater.checkForUpdates();
+    } catch {
+      // Non-fatal, same as the startup check -- the 'error' event already
+      // reached the renderer via onStatus.
+    }
   });
 
   ipcMain.handle('maintenance:usage', () => maintenance.usage(config.get('btaVersion')));
