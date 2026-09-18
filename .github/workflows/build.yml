@@ -119,7 +119,15 @@ jobs:
           # though every file transferred correctly. We only need the files
           # readable as the existing www-data group (already handled by
           # SETUP.md's setgid bit), not owner/group actually mirrored.
-          rsync -av --no-owner --no-group \
+          # --omit-dir-times: the destination dir itself is owned by
+          # www-data, not ubuntu -- ubuntu only has write access to it via
+          # the setgid group bit. Setting an explicit (non-"now") mtime on a
+          # path requires owning it or CAP_FOWNER, so rsync's attempt to
+          # stamp "." with the source's mtime fails with "Operation not
+          # permitted" even though every file inside transfers fine. Files
+          # created fresh by ubuntu are owned by ubuntu, so their own times
+          # still get set -- only pre-existing directory entries are exempt.
+          rsync -av --no-owner --no-group --omit-dir-times \
             -e "ssh -i ~/.ssh/deploy_key -o UserKnownHostsFile=~/.ssh/known_hosts" \
             dist/ ubuntu@130.61.179.91:/var/www/updates/launcher/
 
