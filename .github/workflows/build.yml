@@ -145,21 +145,13 @@ jobs:
           cd dist
           VERSION="${GITHUB_REF_NAME#v}"
 
-          WIN=$(ls *windows-x86_64*.exe)
-          MAC_ARM=$(ls *macos-arm64*.dmg)
-          MAC_X64=$(ls *macos-x64*.dmg)
-          LINUX=$(ls *linux-x86_64*.AppImage)
-
-          # electron-builder embeds package.json's version in these
-          # filenames, which won't match $VERSION if the tag and
-          # package.json drifted apart -- not fatal (files are still found
-          # by their fixed suffix above), but worth a loud heads-up rather
-          # than a silently mislabeled release.
-          for f in "$WIN" "$MAC_ARM" "$MAC_X64" "$LINUX"; do
-            case "$f" in *"$VERSION"*) ;; *)
-              echo "::warning::$f doesn't contain tag version $VERSION -- bump package.json's version to match before tagging next time." ;;
-            esac
-          done
+          # electron-builder.yml's artifactName templates are fixed, versionless
+          # names now (BTUSetup.exe etc.) -- every release overwrites the same
+          # file at the same URL, so these are literal lookups, not patterns.
+          WIN=BTUSetup.exe
+          MAC_ARM=BTULauncher-arm64.dmg
+          MAC_X64=BTULauncher-x64.dmg
+          LINUX=BTULauncher.AppImage
 
           entry() {
             jq -n --arg url "downloads/$1" \

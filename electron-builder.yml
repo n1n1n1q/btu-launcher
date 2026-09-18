@@ -11,11 +11,12 @@ win:
     - target: nsis
       arch: [x64]
   icon: resources/icon.png # electron-builder converts this to .ico at build time
-  # Fixed literal suffix (not electron-builder's default ${arch}, which would
-  # say "x64") so this matches the ucucraft.fun downloads-page contract's
-  # windows-x86_64 build key verbatim -- see docs/PUBLISHING.md. No spaces,
-  # so the filename never needs URL-encoding.
-  artifactName: BTU-Launcher-${version}-windows-x86_64.${ext}
+  # Fixed, versionless name -- every release overwrites the same file at the
+  # same URL on both the update feed and the downloads page, so a download
+  # link never goes stale and the site never needs the version in it. The
+  # ucucraft.fun downloads-page contract only cares about the manifest's
+  # "windows-x86_64" build key (see docs/PUBLISHING.md), not this filename.
+  artifactName: BTUSetup.${ext}
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
@@ -30,19 +31,21 @@ mac:
   icon: resources/icon.png # electron-builder converts this to .icns at build time
   hardenedRuntime: false # no code signing set up yet -- see docs/SETUP.md
   identity: null # explicitly skip codesigning (would otherwise try to find a local cert)
-  # ${arch} resolves to "x64"/"arm64" -- distinct substrings (neither is a
-  # substring of the other) so the publish workflow can tell the two dmgs
-  # apart by filename alone. Mapped to the macos-x86_64/macos-arm64 build
-  # keys in docs/PUBLISHING.md; the "x64" vs "x86_64" wording mismatch is
-  # only in the filename, not in the manifest key, so it's harmless.
-  artifactName: BTU-Launcher-${version}-macos-${arch}.${ext}
+  # Versionless, same reasoning as win.artifactName above. ${arch} (not the
+  # version) is what has to stay: it resolves to "x64"/"arm64" -- distinct
+  # substrings (neither is a substring of the other) so the publish workflow
+  # can still tell the two dmgs apart by filename alone. Mapped to the
+  # macos-x86_64/macos-arm64 build keys in docs/PUBLISHING.md; the "x64" vs
+  # "x86_64" wording mismatch is only in the filename, not the manifest key.
+  artifactName: BTULauncher-${arch}.${ext}
 linux:
   target:
     - target: AppImage
       arch: [x64]
   category: Game
   icon: resources/icon.png
-  artifactName: BTU-Launcher-${version}-linux-x86_64.${ext}
+  # Versionless, same reasoning as win.artifactName above.
+  artifactName: BTULauncher.${ext}
 publish:
   # Points electron-updater at a plain directory on your VPS. After
   # `npm run dist:win`, upload the whole dist/ folder's contents (the
