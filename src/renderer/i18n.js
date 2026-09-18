@@ -88,6 +88,8 @@ window.I18N = (() => {
       'play.preparing': 'Preparing',
       'play.running': 'Running',
       'play.failed': 'Failed to launch: {error}',
+      'play.needsModpack': 'the modpack manifest could not be fetched. Check your connection and try again.',
+      'play.checkMods': 'Check for mod updates',
 
       'game.running': 'Game running.',
       'game.closed': 'Game closed.',
@@ -174,6 +176,8 @@ window.I18N = (() => {
       'play.preparing': 'Підготовка',
       'play.running': 'Гра запущена',
       'play.failed': 'Не вдалося запустити: {error}',
+      'play.needsModpack': 'не вдалося отримати маніфест модпака. Перевірте з’єднання та спробуйте ще раз.',
+      'play.checkMods': 'Перевірити оновлення модів',
 
       'game.running': 'Гра запущена.',
       'game.closed': 'Гру закрито.',

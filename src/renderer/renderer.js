@@ -5,6 +5,7 @@
   const state = {
     profile: null,
     manifest: null,
+    checkingModpack: false,
     running: false,
     preparing: false,
     reinstalling: false,
@@ -141,6 +142,10 @@
       btn.disabled = !state.profile;
       $('play-label').textContent = t(state.profile ? 'play.play' : 'play.signIn');
     }
+
+    const checkBtn = $('modpack-check-btn');
+    checkBtn.disabled = state.running || state.preparing || state.checkingModpack;
+    checkBtn.classList.toggle('checking', state.checkingModpack);
 
     if (state.profile) {
       $('profile-badge').textContent = state.profile.mode === 'microsoft'
@@ -342,17 +347,38 @@
   });
 
   // ---- Modpack -------------------------------------------------------------
-  async function checkModpack() {
+  // Fetches the current manifest. Runs on startup, on the manual button, and
+  // again on every Play so the game never starts against a stale pack. A
+  // second call while one is in flight just waits for the first.
+  let modpackCheck = null;
+  function checkModpack() {
+    if (modpackCheck) return modpackCheck;
+    state.checkingModpack = true;
     setModpack('modpack.checking', {}, 'busy');
-    try {
-      const manifest = await window.btu.modpack.checkUpdate();
-      state.manifest = manifest;
-      $('modpack-version').textContent = manifest.version;
-      setModpack('modpack.ready', { version: manifest.version, count: manifest.files.length }, 'ok');
-    } catch (err) {
-      setModpack('modpack.failed', { error: cleanError(err) }, 'error');
-    }
+    modpackCheck = (async () => {
+      try {
+        const manifest = await window.btu.modpack.checkUpdate();
+        state.manifest = manifest;
+        $('modpack-version').textContent = manifest.version;
+        setModpack('modpack.ready', { version: manifest.version, count: manifest.files.length }, 'ok');
+      } catch (err) {
+        // Drop any manifest from an earlier successful check: otherwise Play
+        // could apply an outdated pack while the UI shows a newer version.
+        state.manifest = null;
+        setModpack('modpack.failed', { error: cleanError(err) }, 'error');
+      } finally {
+        modpackCheck = null;
+        state.checkingModpack = false;
+        renderDynamic();
+      }
+    })();
+    return modpackCheck;
   }
+
+  $('modpack-check-btn').addEventListener('click', () => {
+    if (state.running || state.preparing) return;
+    checkModpack();
+  });
 
   window.btu.modpack.onProgress((p) => {
     if (p.phase === 'download') {
@@ -507,7 +533,12 @@
     renderDynamic();
     setProgressIndeterminate();
     try {
-      if (state.manifest) await window.btu.modpack.applyUpdate(state.manifest);
+      // Always re-check on launch so the pack applied is the one currently
+      // published, not whatever was fetched at startup. Refuse to start if the
+      // check fails rather than launching with the wrong mods.
+      await checkModpack();
+      if (!state.manifest) throw new Error(t('play.needsModpack'));
+      await window.btu.modpack.applyUpdate(state.manifest);
       await window.btu.game.launch(state.profile);
     } catch (err) {
       log(`[launch] ${cleanError(err)}`);

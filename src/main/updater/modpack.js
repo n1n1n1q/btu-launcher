@@ -75,8 +75,18 @@ async function applyUpdate(manifest, gameDirPath, onProgress = () => {}) {
     6
   );
 
+  // A removal that fails (locked jar, permissions) must not be reported as
+  // success -- the old mod would stay in place while the UI says "updated".
+  const failed = [];
   for (const relPath of toRemove) {
-    await fsp.unlink(path.join(gameDirPath, ...relPath.split('/'))).catch(() => {});
+    try {
+      await fsp.unlink(path.join(gameDirPath, ...relPath.split('/')));
+    } catch (err) {
+      if (err.code !== 'ENOENT') failed.push(`${relPath} (${err.code || err.message})`);
+    }
+  }
+  if (failed.length > 0) {
+    throw new Error(`Could not remove ${failed.length} outdated file(s): ${failed.join(', ')}`);
   }
   onProgress({ phase: 'cleanup', removed: toRemove.length });
 
