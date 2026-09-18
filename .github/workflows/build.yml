@@ -8,6 +8,13 @@ name: Build launcher
 on:
   workflow_dispatch: {}
   push:
+    # Every push to main builds all four installers as downloadable
+    # artifacts, so a broken build surfaces at merge time rather than at
+    # release time. Only a v* tag goes further: the deploy and
+    # publish-downloads jobs below are gated on the tag ref, so main pushes
+    # never touch the update feed or the downloads page.
+    branches:
+      - main
     tags:
       - 'v*'
 
