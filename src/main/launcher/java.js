@@ -3,9 +3,10 @@
 // players install a JRE themselves, we download Eclipse Temurin's JRE 17 from
 // the Adoptium API and keep it under paths.javaDir() -- fully self-contained.
 //
-// macOS support is stubbed (see ADOPTIUM_OS below) -- fill in when the macOS
-// port happens; the Adoptium API shape is identical, just os=mac and the
-// archive layout differs slightly (Contents/Home on macOS).
+// Windows, macOS and Linux are all supported. The Adoptium API shape is the
+// same for each; what differs is the archive (zip on Windows, tar.gz
+// elsewhere) and the unpacked layout -- macOS nests the runtime under
+// Contents/Home, which flattenJavaHome() below normalizes away.
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
@@ -63,6 +64,54 @@ async function checkVersion(javaBinPath) {
   } catch {
     return null;
   }
+}
+
+/** True if `dir` is a Java home -- i.e. it directly contains bin/java(.exe). */
+function isJavaHome(dir) {
+  return (
+    fs.existsSync(path.join(dir, 'bin', 'java')) ||
+    fs.existsSync(path.join(dir, 'bin', 'java.exe'))
+  );
+}
+
+/**
+ * Finds the real Java home inside a freshly extracted archive and moves its
+ * contents up to `extractDir`, so every platform ends up with the same flat
+ * bin/lib layout. Searches a couple of levels deep, which covers both the
+ * Windows/Linux `<top>/bin` shape and macOS's `<top>/Contents/Home/bin`.
+ */
+async function flattenJavaHome(extractDir) {
+  if (isJavaHome(extractDir)) return;
+
+  const candidates = [];
+  const walk = (dir, depth) => {
+    if (depth > 3) return;
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const child = path.join(dir, entry.name);
+      if (isJavaHome(child)) candidates.push(child);
+      else walk(child, depth + 1);
+    }
+  };
+  walk(extractDir, 0);
+
+  if (candidates.length === 0) return; // caller reports the missing executable
+  const home = candidates[0];
+
+  // Move to a sibling staging dir first: the home is nested *inside* the very
+  // directory being flattened, so renaming its children straight into
+  // extractDir can collide with the ancestors still sitting there.
+  const staging = `${extractDir}-staging`;
+  await fsp.rm(staging, { recursive: true, force: true });
+  await fsp.rename(home, staging);
+  await fsp.rm(extractDir, { recursive: true, force: true });
+  await fsp.rename(staging, extractDir);
 }
 
 /** Returns a usable Java 17 executable path, downloading a JRE if none is configured/found. */
@@ -131,27 +180,20 @@ async function ensureJava17(onProgress) {
     );
   }
 
-  // Zip archives (Windows) still carry one top-level folder
-  // (e.g. jdk-17.0.13+11-jre) -- flatten it so javawPath()'s fixed layout holds.
-  const entries = await fsp.readdir(extractDir);
-  if (entries.length === 1) {
-    const inner = path.join(extractDir, entries[0]);
-    for (const name of await fsp.readdir(inner)) {
-      await fsp.rename(path.join(inner, name), path.join(extractDir, name));
-    }
-    await fsp.rmdir(inner);
-  }
-
-  // macOS Adoptium archives additionally nest the real JRE under
-  // Contents/Home (that's the layout /usr/libexec/java_home expects) --
-  // flatten that too so it matches Windows/Linux's flat bin/lib layout.
-  const contentsHome = path.join(extractDir, 'Contents', 'Home');
-  if (fs.existsSync(contentsHome)) {
-    for (const name of await fsp.readdir(contentsHome)) {
-      await fsp.rename(path.join(contentsHome, name), path.join(extractDir, name));
-    }
-    await fsp.rm(path.join(extractDir, 'Contents'), { recursive: true, force: true });
-  }
+  // Normalize whatever layout the archive unpacked into down to a flat
+  // bin/lib tree, which is what javawPath() expects.
+  //
+  // The layouts differ per platform, and blindly flattening a lone top-level
+  // directory gets macOS wrong: Adoptium's mac archives nest the runtime under
+  // <top>/Contents/Home, and --strip-components=1 has already removed <top>,
+  // leaving "Contents" as the single entry. Hoisting its children then yields
+  // Home/, Info.plist, MacOS/ at the root -- so the Contents/Home check below
+  // no longer matches, bin/java never appears, and the launch dies with
+  // "Java download completed but the expected executable was not found."
+  //
+  // So: locate the directory that actually contains bin/java (or bin/java.exe)
+  // and promote that one, rather than assuming a fixed shape.
+  await flattenJavaHome(extractDir);
 
   const finalPath = javawPath();
   if (!fs.existsSync(finalPath)) {
