@@ -6,6 +6,8 @@
     profile: null,
     manifest: null,
     checkingModpack: false,
+    updaterState: null, // mirrors the raw states initSelfUpdater emits
+    checkingUpdater: false,
     running: false,
     preparing: false,
     reinstalling: false,
@@ -138,6 +140,13 @@
     } else if (state.preparing) {
       btn.disabled = true;
       $('play-label').textContent = t('play.preparing');
+    } else if (['checking', 'available', 'downloading'].includes(state.updaterState)) {
+      // The launcher itself is actively updating -- block Play rather than
+      // let someone start a session on a binary that's about to be replaced.
+      // 'ready' (downloaded, just needs a restart) is deliberately excluded:
+      // that's a passive "restart to update" hint, not a block.
+      btn.disabled = true;
+      $('play-label').textContent = t('play.launcherUpdating');
     } else {
       btn.disabled = !state.profile;
       $('play-label').textContent = t(state.profile ? 'play.play' : 'play.signIn');
@@ -146,6 +155,13 @@
     const checkBtn = $('modpack-check-btn');
     checkBtn.disabled = state.running || state.preparing || state.checkingModpack;
     checkBtn.classList.toggle('checking', state.checkingModpack);
+
+    const updaterCheckBtn = $('updater-check-btn');
+    updaterCheckBtn.disabled = state.checkingUpdater || state.updaterState === 'checking';
+    updaterCheckBtn.classList.toggle(
+      'checking',
+      state.checkingUpdater || state.updaterState === 'checking' || state.updaterState === 'downloading'
+    );
 
     if (state.profile) {
       $('profile-badge').textContent = state.profile.mode === 'microsoft'
@@ -339,11 +355,30 @@
       error: 'updater.error',
     }[s.state];
     if (!key) return;
+    state.updaterState = s.state;
+    if (s.state !== 'checking') state.checkingUpdater = false;
     messages.updater = {
       key,
       vars: { percent: s.progress ? Math.round(s.progress.percent) : 0 },
     };
     renderDynamic();
+  });
+
+  $('updater-check-btn').addEventListener('click', async () => {
+    if (state.checkingUpdater) return;
+    state.checkingUpdater = true;
+    renderDynamic();
+    try {
+      await window.btu.updater.check();
+    } catch (err) {
+      // Only reaches here for the "not packaged" guard -- a real check
+      // failure resolves quietly and shows up via onStatus's 'error' state.
+      messages.updater = { key: 'updater.error', vars: {} };
+      log(`[updater] ${cleanError(err)}`);
+    } finally {
+      state.checkingUpdater = false;
+      renderDynamic();
+    }
   });
 
   // ---- Modpack -------------------------------------------------------------
