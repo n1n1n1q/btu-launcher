@@ -28,11 +28,19 @@ nsis:
   allowToChangeInstallationDirectory: true
 mac:
   target:
+    # No `arch:` here -- an arch pinned on the target itself overrides the
+    # CLI's --x64/--arm64 (build.yml's two parallel macos-latest jobs), so
+    # having it here made BOTH jobs build BOTH archs every time regardless
+    # of which flag was passed. That's not just wasted time: each job's
+    # `dist/*.dmg` glob then uploaded both dmgs under its own artifact name,
+    # so deploy/publish-downloads/github-release all ended up with two
+    # different builds colliding on the same filename (BTULauncher-x64.dmg,
+    # BTULauncher-arm64.dmg) -- non-deterministically overwritten, and in
+    # download-artifact's merge-multiple case, at risk of a concurrent-write
+    # corrupting the file (surfaced as macOS's "disk image couldn't be
+    # opened" error). package.json's dist:mac passes --x64 --arm64 itself
+    # now so a plain local build still produces both, like before.
     - target: dmg
-      # Both by default -- what a local `npm run dist:mac` builds. CI splits
-      # these into two parallel macos-latest jobs instead (see build.yml),
-      # each passing --x64/--arm64 to build just one arch and finish sooner.
-      arch: [x64, arm64]
   category: public.app-category.games
   icon: resources/icon.png # electron-builder converts this to .icns at build time
   hardenedRuntime: false # no code signing set up yet -- see docs/SETUP.md
