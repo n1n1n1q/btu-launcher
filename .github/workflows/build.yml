@@ -120,21 +120,24 @@ jobs:
 
       - name: Upload installers to updates.* /launcher/
         run: |
-          # --no-owner --no-group: -a tries to chgrp the destination to match
-          # the runner's own (arbitrary) uid/gid, which ubuntu has no
-          # permission to do -- failed with "Operation not permitted" even
-          # though every file transferred correctly. We only need the files
-          # readable as the existing www-data group (already handled by
-          # SETUP.md's setgid bit), not owner/group actually mirrored.
-          # --omit-dir-times: the destination dir itself is owned by
-          # www-data, not ubuntu -- ubuntu only has write access to it via
-          # the setgid group bit. Setting an explicit (non-"now") mtime on a
-          # path requires owning it or CAP_FOWNER, so rsync's attempt to
-          # stamp "." with the source's mtime fails with "Operation not
-          # permitted" even though every file inside transfers fine. Files
-          # created fresh by ubuntu are owned by ubuntu, so their own times
-          # still get set -- only pre-existing directory entries are exempt.
-          rsync -av --no-owner --no-group --omit-dir-times \
+          # /var/www/updates/launcher/ is owned by www-data; ubuntu only has
+          # write access to it via the setgid group bit from SETUP.md, not
+          # ownership. -a tries to mirror owner, group, times, and
+          # permissions onto the destination -- for every file inside that's
+          # fine (ubuntu recreates them fresh on each deploy, so it owns them
+          # and can set their attributes), but for the pre-existing top-level
+          # directory entry itself ("."), setting any of those requires
+          # owning the path or CAP_FOWNER, which ubuntu has neither of. Each
+          # of these has failed with "Operation not permitted" on "." in
+          # turn as -a tried to sync one more attribute of it:
+          #   --no-owner --no-group  (chown/chgrp on ".")
+          #   --omit-dir-times       (mtime on ".")
+          #   --no-perms             (chmod on ".")
+          # The real fix is `sudo chown ubuntu:www-data /var/www/updates/launcher`
+          # on the VPS (SETUP.md Part D2) -- ubuntu then owns "." too and none
+          # of this is needed. Left in place either way since it's harmless
+          # once that's done.
+          rsync -av --no-owner --no-group --omit-dir-times --no-perms \
             -e "ssh -i ~/.ssh/deploy_key -o UserKnownHostsFile=~/.ssh/known_hosts" \
             dist/ ubuntu@130.61.179.91:/var/www/updates/launcher/
 

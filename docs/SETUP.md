@@ -182,15 +182,26 @@ One-time setup, already done for `ubuntu@130.61.179.91`:
 
 1. A dedicated key pair was generated for CI (not your personal key) and its
    public half appended to the server's `~/.ssh/authorized_keys`.
-2. The server's `/var/www/updates/launcher/` needs to be group-writable by
-   `ubuntu` (it's owned by `www-data` from Part A2). Run once on the VPS:
+2. The server's `/var/www/updates/launcher/` needs to be writable by `ubuntu`
+   (it's owned by `www-data` from Part A2). Run once on the VPS:
    ```bash
    sudo usermod -aG www-data ubuntu
+   sudo chown ubuntu:www-data /var/www/updates/launcher
    sudo chmod -R g+w /var/www/updates/launcher
    sudo chmod g+s /var/www/updates/launcher   # new uploads keep the www-data group
    ```
    Log out/in (or just start a new SSH session) after `usermod` for the group
    change to take effect.
+
+   The `chown` matters beyond just permissions: `ubuntu` recreates every file
+   inside this directory on each deploy, so it already owns those and `rsync
+   -a` can freely mirror their timestamps/permissions -- but the directory
+   entry itself pre-exists and was never recreated by `ubuntu`, and setting
+   an explicit (non-"now") mtime or permission bits on a path you don't own
+   requires `CAP_FOWNER`, not just group-write. Without this `chown`, the
+   build workflow's deploy step needs `--omit-dir-times`/`--no-perms` on its
+   rsync call to route around exactly that (see the comment there) -- with
+   it, `ubuntu` owns "." too and those workarounds become unnecessary.
 3. The private half of the CI key pair needs to be added as a repository
    secret named `DEPLOY_SSH_KEY`: GitHub repo → **Settings → Secrets and
    variables → Actions → New repository secret**. Paste the *private* key
