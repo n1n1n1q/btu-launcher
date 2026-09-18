@@ -725,6 +725,33 @@ input[type="range"]:hover::-webkit-slider-thumb { background: var(--accent-hi); 
 
 .play-block { flex: none; }
 
+/* Play + the modpack re-check button share one row: |  PLAY  |O| */
+.play-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+.play-row .btn.play { flex: 1; min-width: 0; }
+
+.btn.play-aux {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 54px;
+  padding: 0;
+  border-radius: var(--radius);
+  box-shadow: 0 6px 20px rgba(144, 196, 49, 0.18);
+}
+.btn.play-aux:disabled { box-shadow: none; }
+.btn.play-aux .refresh-icon { width: 20px; height: 20px; }
+.btn.play-aux.checking .refresh-icon { animation: spin 0.9s linear infinite; }
+.btn.play-aux:disabled .refresh-icon { opacity: 0.5; }
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 .btn.play {
   display: flex;
   align-items: center;
