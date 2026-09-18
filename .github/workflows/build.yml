@@ -10,9 +10,9 @@ on:
   push:
     # Every push to main builds all four installers as downloadable
     # artifacts, so a broken build surfaces at merge time rather than at
-    # release time. Only a v* tag goes further: the deploy and
-    # publish-downloads jobs below are gated on the tag ref, so main pushes
-    # never touch the update feed or the downloads page.
+    # release time. Only a v* tag goes further: the deploy, publish-downloads,
+    # and github-release jobs below are all gated on the tag ref, so main
+    # pushes never touch the update feed, the downloads page, or Releases.
     branches:
       - main
     tags:
@@ -231,3 +231,41 @@ jobs:
           #    in place so a visitor never sees a half-written file.
           rsync -av --no-owner --no-group -e "$SSH" dist/releases.json "$USER@$HOST:$SITE/data/releases.json.tmp"
           $SSH "$USER@$HOST" "mv $SITE/data/releases.json.tmp $SITE/data/releases.json"
+
+  # Publishes a GitHub Release for the tag, with the four installers attached
+  # as downloadable assets -- a third, independent destination alongside
+  # deploy (the in-app update feed) and publish-downloads (the ucucraft.fun
+  # site). Uses the GITHUB_TOKEN GitHub Actions provides automatically, so
+  # no extra secret setup is needed the way the other two jobs' SSH keys are.
+  github-release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all built installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: btu-launcher-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # --generate-notes has gh diff this tag against the previous one
+          # for an auto-written changelog; --latest marks it the repo's
+          # "Latest" release (the default for a non-prerelease tag anyway,
+          # named here so it's not accidentally left implicit).
+          gh release create "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes \
+            --latest \
+            dist/BTUSetup.exe \
+            dist/BTULauncher-arm64.dmg \
+            dist/BTULauncher-x64.dmg \
+            dist/BTULauncher.AppImage
