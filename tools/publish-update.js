@@ -26,6 +26,17 @@ const crypto = require('node:crypto');
 
 const MANAGED_PREFIXES = ['mods', 'config', 'coremods', 'datapacks', 'discpack', 'resourcepacks'];
 
+// A source instance's mods/ folder tends to accumulate things that are not
+// mods -- disabled jars renamed to .jar.disabled, old pre-Fabric resource
+// zips, editor backups, .DS_Store. Publishing those pushes files the loader
+// either ignores or chokes on to every player, so mods/ ships .jar only.
+// The other managed folders legitimately hold mixed file types (config/ is
+// .cfg/.json/.toml, resourcepacks/ is .zip, datapacks/ is whole trees), so
+// they are copied as-is.
+const PREFIX_FILE_FILTERS = {
+  mods: (relPath) => relPath.toLowerCase().endsWith('.jar'),
+};
+
 function parseArgs(argv) {
   const args = {};
   for (let i = 0; i < argv.length; i += 1) {
@@ -95,7 +106,12 @@ async function main() {
 
   for (const prefix of MANAGED_PREFIXES) {
     const relPaths = await walk(path.join(source, prefix), prefix);
+    const accepts = PREFIX_FILE_FILTERS[prefix];
     for (const relPath of relPaths) {
+      if (accepts && !accepts(relPath)) {
+        console.log(`  skipped ${relPath} (not a .jar)`);
+        continue;
+      }
       const srcFile = path.join(source, ...relPath.split('/'));
       const stat = await fsp.stat(srcFile);
       const hash = await sha1(srcFile);
