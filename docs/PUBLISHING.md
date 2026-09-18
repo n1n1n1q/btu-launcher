@@ -45,22 +45,22 @@ never breaks the page.
   "released": "2026-09-18T12:00:00Z",
   "builds": {
     "windows-x86_64": {
-      "url": "downloads/BTU-Launcher-0.2.0-windows-x86_64.exe",
+      "url": "downloads/BTUSetup.exe",
       "size": 78123456,
       "sha256": "9f2b...c41"
     },
     "macos-arm64": {
-      "url": "downloads/BTU-Launcher-0.2.0-macos-arm64.dmg",
+      "url": "downloads/BTULauncher-arm64.dmg",
       "size": 81234567,
       "sha256": "1a77...0be"
     },
     "macos-x86_64": {
-      "url": "downloads/BTU-Launcher-0.2.0-macos-x64.dmg",
+      "url": "downloads/BTULauncher-x64.dmg",
       "size": 84234567,
       "sha256": "77cd...9a2"
     },
     "linux-x86_64": {
-      "url": "downloads/BTU-Launcher-0.2.0-linux-x86_64.AppImage",
+      "url": "downloads/BTULauncher.AppImage",
       "size": 92345678,
       "sha256": "b30e...5f1"
     }
@@ -87,14 +87,22 @@ never breaks the page.
   it's needed. Until then the site's Prism link falls back to `downloads/ucucraft-prism.zip` (its
   own default — nothing to do here unless that link should point somewhere real).
 
+### Filenames are fixed and versionless
+
+`electron-builder.yml`'s `artifactName` templates (`BTUSetup.exe`, `BTULauncher-${arch}.dmg`,
+`BTULauncher.AppImage`) carry no version number. Every release overwrites the same file at the
+same URL on both this downloads page and the update feed (`SETUP.md` Part D), so a shared or
+bookmarked download link always serves the current release and never goes stale — but it also
+means there's no way to fetch an older version's installer once a new one has been published (see
+Housekeeping below).
+
 ### Why the mac filenames say `x64`, not `x86_64`
 
-`electron-builder.yml`'s `artifactName` templates use its `${arch}` token for the mac target
+`electron-builder.yml`'s `artifactName` template uses its `${arch}` token for the mac target
 (needed to tell the Intel and Apple Silicon dmg apart at all), which resolves to `x64`/`arm64` —
 there's no `${arch}` value that renders as `x86_64`. The **manifest key** is still the required
 literal `macos-x86_64`; only the filename on disk says `x64`. Windows and Linux only ever build one
-architecture, so their `artifactName` is a fixed literal ending in `-x86_64` instead, with no
-token — nothing to mismatch there.
+architecture, so their `artifactName` needs no token at all.
 
 ---
 
@@ -173,7 +181,10 @@ key is missing or misspelled in `builds`.
 
 ## 7. Housekeeping
 
-- Keep the last 2–3 versions in `downloads/`, delete older ones by hand over SSH — the disk is
-  shared with the Minecraft server, and this job never deletes anything on its own.
+- Nothing to delete: each release's `rsync` overwrites the same four fixed filenames in
+  `downloads/` in place, so there's no version buildup on disk the way there was when filenames
+  carried the version. This also means there's no way to keep an older version downloadable
+  alongside the current one -- if that's ever needed, it'd have to be uploaded under its own name
+  by hand and given its own manifest entry outside the normal `builds` keys.
 - No nginx change is ever needed for this. The page requests the manifest with `cache: "no-store"`
   and a cache-buster, so a new manifest is picked up on the next page load.
