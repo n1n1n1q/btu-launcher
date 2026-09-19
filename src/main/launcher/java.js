@@ -3,9 +3,10 @@
 // players install a JRE themselves, we download Eclipse Temurin's JRE 17 from
 // the Adoptium API and keep it under paths.javaDir() -- fully self-contained.
 //
-// macOS support is stubbed (see ADOPTIUM_OS below) -- fill in when the macOS
-// port happens; the Adoptium API shape is identical, just os=mac and the
-// archive layout differs slightly (Contents/Home on macOS).
+// Windows, macOS and Linux are all supported. The Adoptium API shape is the
+// same for each; what differs is the archive (zip on Windows, tar.gz
+// elsewhere) and the unpacked layout -- macOS nests the runtime under
+// Contents/Home, which flattenJavaHome() below normalizes away.
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
@@ -47,9 +48,23 @@ async function extractArchive(archivePath, kind, extractDir) {
   await execFileAsync('tar', ['-xzf', archivePath, '-C', extractDir, '--strip-components=1']);
 }
 
+// The managed JRE lives under a directory named for the architecture it was
+// built for. It used to be a bare "17", shared by every arch -- so an x64 run
+// and an arm64 run of the same install overwrote each other's runtime in
+// place. That is not hypothetical on macOS: building both dmgs, or launching
+// the x64 build once on an Apple Silicon machine, leaves an x86_64 JRE sitting
+// where the arm64 app then finds it. checkVersion() only asks `java -version`,
+// which an x86_64 JRE answers perfectly well under Rosetta, so the mismatch
+// passed the reuse check and the game died later on
+// "UnsatisfiedLinkError: Failed to locate library: liblwjgl.dylib" -- the
+// arm64 natives being unloadable by an x86_64 JVM.
+function javaInstallDir() {
+  return path.join(paths.javaDir(), `17-${process.arch}`);
+}
+
 function javawPath() {
   const exe = process.platform === 'win32' ? 'javaw.exe' : 'java';
-  return path.join(paths.javaDir(), '17', 'bin', exe);
+  return path.join(javaInstallDir(), 'bin', exe);
 }
 
 async function checkVersion(javaBinPath) {
@@ -65,13 +80,102 @@ async function checkVersion(javaBinPath) {
   }
 }
 
+/** True if `dir` is a Java home -- i.e. it directly contains bin/java(.exe). */
+function isJavaHome(dir) {
+  return (
+    fs.existsSync(path.join(dir, 'bin', 'java')) ||
+    fs.existsSync(path.join(dir, 'bin', 'java.exe'))
+  );
+}
+
+/**
+ * Finds the real Java home inside a freshly extracted archive and moves its
+ * contents up to `extractDir`, so every platform ends up with the same flat
+ * bin/lib layout. Searches a couple of levels deep, which covers both the
+ * Windows/Linux `<top>/bin` shape and macOS's `<top>/Contents/Home/bin`.
+ */
+async function flattenJavaHome(extractDir) {
+  if (isJavaHome(extractDir)) return;
+
+  const candidates = [];
+  const walk = (dir, depth) => {
+    if (depth > 3) return;
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const child = path.join(dir, entry.name);
+      if (isJavaHome(child)) candidates.push(child);
+      else walk(child, depth + 1);
+    }
+  };
+  walk(extractDir, 0);
+
+  if (candidates.length === 0) return; // caller reports the missing executable
+  const home = candidates[0];
+
+  // Move to a sibling staging dir first: the home is nested *inside* the very
+  // directory being flattened, so renaming its children straight into
+  // extractDir can collide with the ancestors still sitting there.
+  const staging = `${extractDir}-staging`;
+  await fsp.rm(staging, { recursive: true, force: true });
+  await fsp.rename(home, staging);
+  await fsp.rm(extractDir, { recursive: true, force: true });
+  await fsp.rename(staging, extractDir);
+}
+
+// Maps a Node process.arch onto the architecture names `file`/Mach-O use, so a
+// JRE built for another arch is rejected rather than half-working. Only macOS
+// can silently run the wrong one (via Rosetta), but the check is harmless
+// elsewhere and guards the same cache-collision case on any platform.
+// arm64e is Apple's pointer-authenticated arm64 variant, used by system
+// binaries and universal builds; an arm64 process runs it fine, so both names
+// count as a match. Missing it rejected /usr/bin/java ("x86_64 arm64e").
+const MACHO_ARCH_NAMES = { arm64: ['arm64', 'arm64e'], x64: ['x86_64'], ia32: ['i386'] };
+
+/**
+ * True if `javaBinPath` is executable by this process's architecture. On
+ * non-macOS platforms, or when the arch can't be determined, this is lenient:
+ * checkVersion() has already proved the binary runs.
+ */
+async function matchesCurrentArch(javaBinPath) {
+  if (process.platform !== 'darwin') return true;
+  const expected = MACHO_ARCH_NAMES[process.arch];
+  if (!expected) return true;
+  try {
+    const real = javaBinPath.replace('javaw.exe', 'java.exe');
+    const { stdout } = await execFileAsync('lipo', ['-archs', real]);
+    const archs = stdout.trim().split(/\s+/);
+    return archs.some((a) => expected.includes(a));
+  } catch {
+    return true; // lipo missing or unreadable -- don't block a working runtime
+  }
+}
+
 /** Returns a usable Java 17 executable path, downloading a JRE if none is configured/found. */
 async function ensureJava17(onProgress) {
   const configured = config.get('javaPath');
-  if (configured && (await checkVersion(configured)) >= 17) return configured;
+  if (configured && (await checkVersion(configured)) >= 17) {
+    if (await matchesCurrentArch(configured)) return configured;
+    throw new Error(
+      `The configured Java path (${configured}) is built for a different ` +
+        `architecture than this launcher (${process.arch}). Clear the Java path ` +
+        'setting to use the managed runtime instead.'
+    );
+  }
 
   const managed = javawPath();
-  if (fs.existsSync(managed) && (await checkVersion(managed)) >= 17) return managed;
+  if (
+    fs.existsSync(managed) &&
+    (await checkVersion(managed)) >= 17 &&
+    (await matchesCurrentArch(managed))
+  ) {
+    return managed;
+  }
 
   if (!ADOPTIUM_OS) {
     throw new Error(`No managed Java download available for platform "${process.platform}" yet.`);
@@ -114,7 +218,7 @@ async function ensureJava17(onProgress) {
     onProgress,
   });
 
-  const extractDir = path.join(paths.javaDir(), '17');
+  const extractDir = javaInstallDir();
   await fsp.rm(extractDir, { recursive: true, force: true });
   await fsp.mkdir(extractDir, { recursive: true });
   try {
@@ -131,27 +235,20 @@ async function ensureJava17(onProgress) {
     );
   }
 
-  // Zip archives (Windows) still carry one top-level folder
-  // (e.g. jdk-17.0.13+11-jre) -- flatten it so javawPath()'s fixed layout holds.
-  const entries = await fsp.readdir(extractDir);
-  if (entries.length === 1) {
-    const inner = path.join(extractDir, entries[0]);
-    for (const name of await fsp.readdir(inner)) {
-      await fsp.rename(path.join(inner, name), path.join(extractDir, name));
-    }
-    await fsp.rmdir(inner);
-  }
-
-  // macOS Adoptium archives additionally nest the real JRE under
-  // Contents/Home (that's the layout /usr/libexec/java_home expects) --
-  // flatten that too so it matches Windows/Linux's flat bin/lib layout.
-  const contentsHome = path.join(extractDir, 'Contents', 'Home');
-  if (fs.existsSync(contentsHome)) {
-    for (const name of await fsp.readdir(contentsHome)) {
-      await fsp.rename(path.join(contentsHome, name), path.join(extractDir, name));
-    }
-    await fsp.rm(path.join(extractDir, 'Contents'), { recursive: true, force: true });
-  }
+  // Normalize whatever layout the archive unpacked into down to a flat
+  // bin/lib tree, which is what javawPath() expects.
+  //
+  // The layouts differ per platform, and blindly flattening a lone top-level
+  // directory gets macOS wrong: Adoptium's mac archives nest the runtime under
+  // <top>/Contents/Home, and --strip-components=1 has already removed <top>,
+  // leaving "Contents" as the single entry. Hoisting its children then yields
+  // Home/, Info.plist, MacOS/ at the root -- so the Contents/Home check below
+  // no longer matches, bin/java never appears, and the launch dies with
+  // "Java download completed but the expected executable was not found."
+  //
+  // So: locate the directory that actually contains bin/java (or bin/java.exe)
+  // and promote that one, rather than assuming a fixed shape.
+  await flattenJavaHome(extractDir);
 
   const finalPath = javawPath();
   if (!fs.existsSync(finalPath)) {

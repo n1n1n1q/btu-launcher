@@ -105,6 +105,25 @@ function pct({ downloaded, total }) {
   return `${Math.floor((downloaded / total) * 100)}%`;
 }
 
+// GLFW on macOS can only run its event loop on the process's first thread, so
+// the JVM has to be told to hand that thread to main() instead of keeping it
+// for its own use. Without -XstartOnFirstThread, LWJGL 3's glfwInit() fails and
+// the game dies during window creation -- it never draws anything, which is
+// exactly the "nothing happens when I press Play" symptom.
+//
+// The instance meta flags this itself via the "FirstThreadOnMacOS" trait (see
+// net.minecraft.json's "+traits"). It is applied unconditionally on macOS
+// rather than read from that trait: every LWJGL 3 build needs it, so a missing
+// trait would be a meta omission rather than a signal to leave it off.
+function macosJvmArgs() {
+  if (process.platform !== 'darwin') return [];
+  const args = ['-XstartOnFirstThread'];
+  // b1.7.3 predates the LWJGL/GLFW dock-integration handling, so the process
+  // otherwise shows up in the Dock as a generic "java" entry.
+  args.push('-Xdock:name=BTU');
+  return args;
+}
+
 /**
  * Launches the game. `profile` is the object returned by auth/offline.js or
  * auth/microsoft.js. Returns the child process; caller should listen to its
@@ -130,6 +149,7 @@ async function launch({ btaVersion, profile, ramMb, report = () => {} }) {
     `-Xmx${ramMb}M`,
     `-Xms${Math.min(ramMb, 1024)}M`,
     `-Djava.library.path=${nativesDirPath}`,
+    ...macosJvmArgs(),
     '-cp',
     classpath,
     meta.loader.mainClass,
