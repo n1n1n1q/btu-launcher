@@ -48,9 +48,23 @@ async function extractArchive(archivePath, kind, extractDir) {
   await execFileAsync('tar', ['-xzf', archivePath, '-C', extractDir, '--strip-components=1']);
 }
 
+// The managed JRE lives under a directory named for the architecture it was
+// built for. It used to be a bare "17", shared by every arch -- so an x64 run
+// and an arm64 run of the same install overwrote each other's runtime in
+// place. That is not hypothetical on macOS: building both dmgs, or launching
+// the x64 build once on an Apple Silicon machine, leaves an x86_64 JRE sitting
+// where the arm64 app then finds it. checkVersion() only asks `java -version`,
+// which an x86_64 JRE answers perfectly well under Rosetta, so the mismatch
+// passed the reuse check and the game died later on
+// "UnsatisfiedLinkError: Failed to locate library: liblwjgl.dylib" -- the
+// arm64 natives being unloadable by an x86_64 JVM.
+function javaInstallDir() {
+  return path.join(paths.javaDir(), `17-${process.arch}`);
+}
+
 function javawPath() {
   const exe = process.platform === 'win32' ? 'javaw.exe' : 'java';
-  return path.join(paths.javaDir(), '17', 'bin', exe);
+  return path.join(javaInstallDir(), 'bin', exe);
 }
 
 async function checkVersion(javaBinPath) {
@@ -114,13 +128,54 @@ async function flattenJavaHome(extractDir) {
   await fsp.rename(staging, extractDir);
 }
 
+// Maps a Node process.arch onto the architecture names `file`/Mach-O use, so a
+// JRE built for another arch is rejected rather than half-working. Only macOS
+// can silently run the wrong one (via Rosetta), but the check is harmless
+// elsewhere and guards the same cache-collision case on any platform.
+// arm64e is Apple's pointer-authenticated arm64 variant, used by system
+// binaries and universal builds; an arm64 process runs it fine, so both names
+// count as a match. Missing it rejected /usr/bin/java ("x86_64 arm64e").
+const MACHO_ARCH_NAMES = { arm64: ['arm64', 'arm64e'], x64: ['x86_64'], ia32: ['i386'] };
+
+/**
+ * True if `javaBinPath` is executable by this process's architecture. On
+ * non-macOS platforms, or when the arch can't be determined, this is lenient:
+ * checkVersion() has already proved the binary runs.
+ */
+async function matchesCurrentArch(javaBinPath) {
+  if (process.platform !== 'darwin') return true;
+  const expected = MACHO_ARCH_NAMES[process.arch];
+  if (!expected) return true;
+  try {
+    const real = javaBinPath.replace('javaw.exe', 'java.exe');
+    const { stdout } = await execFileAsync('lipo', ['-archs', real]);
+    const archs = stdout.trim().split(/\s+/);
+    return archs.some((a) => expected.includes(a));
+  } catch {
+    return true; // lipo missing or unreadable -- don't block a working runtime
+  }
+}
+
 /** Returns a usable Java 17 executable path, downloading a JRE if none is configured/found. */
 async function ensureJava17(onProgress) {
   const configured = config.get('javaPath');
-  if (configured && (await checkVersion(configured)) >= 17) return configured;
+  if (configured && (await checkVersion(configured)) >= 17) {
+    if (await matchesCurrentArch(configured)) return configured;
+    throw new Error(
+      `The configured Java path (${configured}) is built for a different ` +
+        `architecture than this launcher (${process.arch}). Clear the Java path ` +
+        'setting to use the managed runtime instead.'
+    );
+  }
 
   const managed = javawPath();
-  if (fs.existsSync(managed) && (await checkVersion(managed)) >= 17) return managed;
+  if (
+    fs.existsSync(managed) &&
+    (await checkVersion(managed)) >= 17 &&
+    (await matchesCurrentArch(managed))
+  ) {
+    return managed;
+  }
 
   if (!ADOPTIUM_OS) {
     throw new Error(`No managed Java download available for platform "${process.platform}" yet.`);
@@ -163,7 +218,7 @@ async function ensureJava17(onProgress) {
     onProgress,
   });
 
-  const extractDir = path.join(paths.javaDir(), '17');
+  const extractDir = javaInstallDir();
   await fsp.rm(extractDir, { recursive: true, force: true });
   await fsp.mkdir(extractDir, { recursive: true });
   try {
